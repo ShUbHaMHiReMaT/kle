@@ -81,6 +81,7 @@ function ensureSetup_() {
 function initialize_() {
   const lock = LockService.getScriptLock();
   lock.waitLock(30000);
+  const hadLock = _HAS_LOCK; _HAS_LOCK = true;
   try {
     // Root Drive folder
     let root = null;
@@ -122,6 +123,7 @@ function initialize_() {
 
     return { ok: true, spreadsheet: ss.getUrl(), rootFolder: root.getUrl(), owner: Session.getEffectiveUser().getEmail(), version: APP_VERSION };
   } finally {
+    _HAS_LOCK = hadLock;
     lock.releaseLock();
   }
 }
@@ -199,19 +201,32 @@ function cellv_(v) {
   if (v instanceof Date) v = v.toISOString();
   return "'" + String(v);
 }
+let _HAS_LOCK = false;
+/** Runs fn under the script lock unless this request already holds it (keeps row writes atomic). */
+function withLock_(fn) {
+  if (_HAS_LOCK) return fn();
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) throw new Error('The portfolio is busy saving other work. Please try again in a few seconds.');
+  _HAS_LOCK = true;
+  try { return fn(); } finally { _HAS_LOCK = false; lock.releaseLock(); }
+}
 function insert_(name, obj) {
-  const sh = sheet_(name);
-  const h = headers_(sh);
-  const row = sh.getLastRow() + 1;
-  sh.getRange(row, 1, 1, h.length).setValues([h.map(k => cellv_(obj[k]))]);
-  return obj;
+  return withLock_(() => {
+    const sh = sheet_(name);
+    const h = headers_(sh);
+    const row = sh.getLastRow() + 1;
+    sh.getRange(row, 1, 1, h.length).setValues([h.map(k => cellv_(obj[k]))]);
+    return obj;
+  });
 }
 function update_(name, rowNum, obj) {
-  const sh = sheet_(name);
-  const h = headers_(sh);
-  const cur = sh.getRange(rowNum, 1, 1, h.length).getValues()[0];
-  const next = h.map((k, i) => cellv_(obj.hasOwnProperty(k) ? obj[k] : cur[i]));
-  sh.getRange(rowNum, 1, 1, h.length).setValues([next]);
+  withLock_(() => {
+    const sh = sheet_(name);
+    const h = headers_(sh);
+    const cur = sh.getRange(rowNum, 1, 1, h.length).getValues()[0];
+    const next = h.map((k, i) => cellv_(obj.hasOwnProperty(k) ? obj[k] : cur[i]));
+    sh.getRange(rowNum, 1, 1, h.length).setValues([next]);
+  });
 }
 function remove_(name, rowNum) { sheet_(name).deleteRow(rowNum); }
 function uid_(p) { return p + '_' + Utilities.getUuid().replace(/-/g, '').slice(0, 10); }
@@ -378,15 +393,15 @@ const ACTIONS = {
   addLinkEvidence:{ roles: ['admin', 'student'], write: true, fn: (c, a) => addLinkEvidence_(c, a) },
   deleteEvidence:{ roles: ['admin', 'student'], write: true, fn: (c, a) => deleteEvidence_(c, a) },
   saveReview:   { roles: ['admin', 'coordinator', 'faculty'], write: true, fn: (c, a) => saveReview_(c, a) },
-  mentorChat:   { roles: ['admin', 'student'], write: true, fn: (c, a) => mentorChat_(c, a) },
+  mentorChat:   { roles: ['admin', 'student'], write: true, ai: true, fn: (c, a) => mentorChat_(c, a) },
   mentorHistory:{ roles: ['admin', 'coordinator', 'faculty', 'student'], fn: (c, a) => mentorHistory_(c, a) },
-  quizStart:    { roles: ['student'], write: true, fn: (c, a) => quizStart_(c, a) },
-  quizAnswer:   { roles: ['student'], write: true, fn: (c, a) => quizAnswer_(c, a) },
+  quizStart:    { roles: ['student'], write: true, ai: true, fn: (c, a) => quizStart_(c, a) },
+  quizAnswer:   { roles: ['student'], write: true, ai: true, fn: (c, a) => quizAnswer_(c, a) },
   quizNext:     { roles: ['student'], write: true, fn: (c, a) => quizNext_(c, a) },
   mentorNote:   { roles: ['admin', 'coordinator', 'faculty'], write: true, fn: (c, a) => mentorNote_(c, a) },
   // student's own Gemini key (stored server-side only)
   myKeyStatus:  { roles: ['student'], fn: (c, a) => myKeyStatus_(c) },
-  saveMyKey:    { roles: ['student'], write: true, fn: (c, a) => saveMyKey_(c, a) },
+  saveMyKey:    { roles: ['student'], write: true, ai: true, fn: (c, a) => saveMyKey_(c, a) },
   deleteMyKey:  { roles: ['student'], write: true, fn: (c, a) => deleteMyKey_(c) },
   // admin / coordinator
   adminData:    { roles: ['admin', 'coordinator'], fn: (c) => adminData_(c) },
@@ -427,11 +442,13 @@ function api(req) {
       if (def.roles.indexOf(ctx.role) < 0) throw new Error('You do not have permission for this action.');
     }
     let data;
-    if (def.write) {
+    if (def.write && !def.ai) {
       const lock = LockService.getScriptLock();
-      lock.waitLock(20000);
-      try { data = def.fn(ctx, args); } finally { lock.releaseLock(); }
+      if (!lock.tryLock(30000)) throw new Error('The portfolio is busy saving other work. Please try again in a few seconds.');
+      _HAS_LOCK = true;
+      try { data = def.fn(ctx, args); } finally { _HAS_LOCK = false; lock.releaseLock(); }
     } else {
+      // Read-only and AI actions: no long lock. Each individual sheet write takes a short lock (see withLock_).
       data = def.fn(ctx, args);
     }
     return JSON.stringify({ ok: true, data: data });
@@ -921,7 +938,7 @@ function testKey_(ctx, a) {
   const meta = storedKeysMeta_(); const k = keysMeta_().filter(m => m.id === a.id)[0];
   const model = clean_(a.model, 80) || (k && k.model) || settings_().defaultModel;
   const t0 = Date.now();
-  const text = callGemini_(key, model, 'You are a connectivity test.', [{ role: 'user', parts: [{ text: 'Reply with exactly: OK' }] }], 0, 4000);
+  const text = callGemini_(key, model, 'You are a connectivity test.', [{ role: 'user', parts: [{ text: 'Reply with exactly: OK' }] }], 0, 256, false, 'off');
   const stamp = now_() + ' — OK (' + model + ')';
   if (a.id === ENV_KEY_ID) PROP.setProperty('GEMINI_ENV_LASTTEST', stamp);
   else { const s = meta.filter(m => m.id === a.id)[0]; if (s) { s.lastTest = stamp; saveKeysMeta_(meta); } }
@@ -951,7 +968,8 @@ function assignKeys_(ctx, a) {
 /* ============================================================================
  * AI MENTOR (Gemini)
  * ========================================================================== */
-function callGemini_(key, model, system, contents, temperature, maxTokens, json) {
+/** thinking: 'off' for quick checks (key test), otherwise a small budget so answers come back fast. */
+function callGemini_(key, model, system, contents, temperature, maxTokens, json, thinking) {
   if (!/^[A-Za-z0-9.\-_]+$/.test(model)) throw new Error('Invalid model name.');
   const url = 'https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(model) + ':generateContent';
   const payload = {
@@ -960,10 +978,38 @@ function callGemini_(key, model, system, contents, temperature, maxTokens, json)
     generationConfig: { temperature: temperature, maxOutputTokens: maxTokens || 2048 }
   };
   if (json) payload.generationConfig.responseMimeType = 'application/json';
-  const res = UrlFetchApp.fetch(url, { method: 'post', contentType: 'application/json', headers: { 'x-goog-api-key': key }, payload: JSON.stringify(payload), muteHttpExceptions: true });
-  const code = res.getResponseCode();
-  const body = safeJson_(res.getContentText(), {});
-  if (code !== 200) throw new Error('Gemini error: ' + ((body.error && body.error.message) || ('HTTP ' + code)));
+  // Gemini 2.5 models "think" before answering; cap it so replies are quick and do not time out.
+  if (/gemini-2\.5/i.test(model)) {
+    const pro = /pro/i.test(model);
+    payload.generationConfig.thinkingConfig = { thinkingBudget: thinking === 'off' ? (pro ? 128 : 0) : (pro ? 1024 : 512) };
+  }
+  const opts = { method: 'post', contentType: 'application/json', headers: { 'x-goog-api-key': key }, payload: JSON.stringify(payload), muteHttpExceptions: true };
+  let res = null, code = 0, body = {}, lastErr = '';
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      res = UrlFetchApp.fetch(url, opts);
+      code = res.getResponseCode();
+      body = safeJson_(res.getContentText(), {});
+      if (code === 200) break;
+      lastErr = (body.error && body.error.message) || ('HTTP ' + code);
+      if ([429, 500, 502, 503, 504].indexOf(code) < 0) break;     // only retry "busy" errors
+    } catch (e) {
+      lastErr = String(e && e.message || e);
+      code = 0;
+      if (!/timeout|timed out|deadline|address unavailable|dns/i.test(lastErr)) throw e;
+    }
+    if (attempt === 1) Utilities.sleep(1500);
+  }
+  if (code !== 200) {
+    if (code === 0 || code === 504 || /timeout|timed out|deadline/i.test(lastErr))
+      throw new Error('Timeout: Gemini did not answer in time. Google\'s AI servers are probably busy right now — wait one minute and try again. If it keeps happening, use the model "gemini-2.5-flash-lite".');
+    if (code === 429) throw new Error('Gemini says "too many requests": the free limit for this key is used up for now. Wait a minute (or try tomorrow), or use another key.');
+    if (code === 503) throw new Error('Gemini is overloaded right now. Please wait a minute and try again.');
+    if (code === 400 && /api key/i.test(lastErr)) throw new Error('This API key is not valid. Copy the key again from aistudio.google.com/apikey.');
+    if (code === 403) throw new Error('This key is not allowed to use Gemini (permission denied). Create a new key in aistudio.google.com/apikey.');
+    if (code === 404) throw new Error('Model not found. Use the model "gemini-2.5-flash".');
+    throw new Error('Gemini error: ' + lastErr);
+  }
   const cand = (body.candidates || [])[0];
   if (!cand) throw new Error('Gemini returned no answer' + (body.promptFeedback && body.promptFeedback.blockReason ? ' (blocked: ' + body.promptFeedback.blockReason + ')' : '') + '.');
   const text = ((cand.content || {}).parts || []).filter(p => !p.thought).map(p => p.text || '').join('').trim();
@@ -1395,7 +1441,7 @@ function saveMyKey_(ctx, a) {
   if (!/^[A-Za-z0-9._\-]{20,400}$/.test(key)) throw new Error('That does not look like a valid Gemini API key (no spaces or line breaks allowed).');
   const model = clean_(a.model, 80) || settings_().defaultModel;
   // Verify the key works before storing it
-  callGemini_(key, model, 'You are a connectivity test.', [{ role: 'user', parts: [{ text: 'Reply with exactly: OK' }] }], 0, 4000);
+  callGemini_(key, model, 'You are a connectivity test.', [{ role: 'user', parts: [{ text: 'Reply with exactly: OK' }] }], 0, 256, false, 'off');
   PROP.setProperty('GEMINI_STUKEY_' + ctx.studentId, JSON.stringify({ key: key, model: model, savedAt: now_() }));
   audit_(ctx, 'saveMyKey', ctx.teamId, '…' + key.slice(-4) + ' (' + model + ')');
   return myKeyStatus_(ctx);

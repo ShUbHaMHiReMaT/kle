@@ -88,6 +88,13 @@ Step 7. If you see  "Your key works and is saved securely"
  "API not enabled"                    (Step 5 of Part 1).
  "quota" / "too many requests"        Your free limit for today is
                                       used up. Try again tomorrow.
+ "Timeout" / "did not answer          Google's AI is busy. Wait 1 minute
+  in time" / "overloaded"             and click "Save & test" again.
+                                      Still not working? Type
+                                      gemini-2.5-flash-lite  in the
+                                      Model box and try again.
+ "The portfolio is busy"              Many students are saving at the
+                                      same time. Try again in 5 seconds.
  "Model not found"                    Type  gemini-2.5-flash  in the
                                       Model box and save again.
  Paste does not work                  Use the "Paste" button, or
