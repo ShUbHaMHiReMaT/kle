@@ -1024,7 +1024,8 @@
   function drawAdmin() {
     const tabs = [['faculty', 'Faculty'], ['students', 'Students'], ['teams', 'Teams'], ['gemini', 'Gemini AI'], ['settings', 'Settings'], ['audit', 'Audit log']];
     const c = clear(contentEl);
-    c.appendChild(el('div', { class: 'row between', style: { marginBottom: '12px' } }, el('div', null, el('h1', null, 'Administration'), el('div', { class: 'small muted' }, S.boot.dept.name + ' · all changes are saved to the backend automatically — no manual sheet edits needed.'))));
+    c.appendChild(el('div', { class: 'row between', style: { marginBottom: '12px' } }, el('div', null, el('h1', null, 'Administration'), el('div', { class: 'small muted' }, S.boot.dept.name + ' · all changes are saved to the backend automatically — no manual sheet edits needed.')),
+      el('button', { class: 'btn primary', onclick: () => reminderModal() }, icon('send'), 'Send reminder')));
     c.appendChild(el('div', { class: 'tabs' }, tabs.map(t => el('button', { class: S.adminTab === t[0] ? 'active' : '', onclick: () => { S.adminTab = t[0]; drawAdmin(); } }, t[1]))));
     const pane = el('div'); c.appendChild(pane);
     ({ faculty: admFaculty, students: admStudents, teams: admTeams, gemini: admGemini, settings: admSettings, audit: admAudit })[S.adminTab](pane);
@@ -1119,6 +1120,7 @@
         el('td', null, el('div', { class: 'row', style: { flexWrap: 'nowrap' } },
           el('button', { class: 'btn sm', onclick: () => go('team', { teamId: t.id, tab: 'portfolio', stageId: null }) }, icon('folder'), 'Open'),
           el('button', { class: 'btn sm', onclick: () => editTeam(t) }, icon('edit'), 'Edit'),
+          t.status !== 'Archived' ? el('button', { class: 'btn sm', title: 'Email a reminder to this team', onclick: () => reminderModal([t.id]) }, icon('send'), 'Remind') : null,
           el('button', { class: 'btn sm ' + (t.status === 'Archived' ? '' : 'danger'), onclick: async () => { const r = t.status === 'Archived'; if (!r && !(await confirmBox('Archive team', 'Archive ' + t.name + '? All records are preserved; the team becomes read-only and hidden from guides.', 'Archive', true))) return; try { A().teams = await call('archiveTeam', { id: t.id, restore: r }); drawAdmin(); } catch (e) { toast(e.message, 'bad'); } } }, t.status === 'Archived' ? 'Restore' : 'Archive'))));
     });
     pane.appendChild(tableCard('Teams (' + A().teams.length + ')', el('button', { class: 'btn primary', onclick: () => editTeam({}) }, icon('plus'), 'Create team'), ['Team', 'Theme / Artefact', 'Guide', 'Members', ''], rows, 'No teams yet — create the first team.'));
@@ -1147,6 +1149,49 @@
             reviewerIds: reviewers.filter(r => r.cb.checked).map(r => r.f.id), memberIds: mems.filter(m => m.cb.checked).map(m => m.s.id), status: t.status });
           S.admin = await call('adminData'); c(); drawAdmin(); toast('Team saved. Drive evidence folder is ready.', 'ok');
         } catch (e) { toast(e.message, 'bad'); } } }] });
+  }
+
+  /* ----- Reminders (email to team members) ----- */
+  function reminderModal(preselect) {
+    const teams = A().teams.filter(t => t.status !== 'Archived').sort((a, b) => String(a.name).localeCompare(String(b.name), undefined, { numeric: true }));
+    const withEmail = id => A().students.filter(s => s.teamId === id && isTrue(s.active) && s.email).length;
+    const total = id => A().students.filter(s => s.teamId === id && isTrue(s.active)).length;
+    const boxes = teams.map(t => ({ t: t, cb: el('input', { type: 'checkbox', checked: preselect ? preselect.indexOf(t.id) >= 0 : true }) }));
+    const subject = el('input', { type: 'text', value: 'Mini Project Portfolio — reminder' });
+    const message = el('textarea', { rows: 6, value: 'This is a reminder to update your Mini Project Portfolio.\n\nPlease complete and save the worksheets for your current stage, upload your evidence, and sign the sections that need sign-off before your next review.' });
+    const guides = el('input', { type: 'checkbox', checked: true });
+    const count = el('div', { class: 'small muted' });
+    const quota = el('span', { class: 'small muted' });
+    const upd = () => {
+      const sel = boxes.filter(b => b.cb.checked);
+      const people = sel.reduce((n, b) => n + withEmail(b.t.id), 0);
+      count.textContent = sel.length + ' team(s) selected · ' + people + ' student(s) with email will be reminded' + (guides.checked ? ' (guides in CC)' : '');
+    };
+    boxes.forEach(b => b.cb.addEventListener('change', upd)); guides.addEventListener('change', upd); upd();
+    const all = el('button', { class: 'btn sm', onclick: () => { boxes.forEach(b => b.cb.checked = true); upd(); } }, 'Select all');
+    const none = el('button', { class: 'btn sm', onclick: () => { boxes.forEach(b => b.cb.checked = false); upd(); } }, 'Clear');
+    call('mailQuota').then(q => { quota.textContent = 'Emails left today (Google quota): ' + q.remaining; }).catch(() => {});
+    modal({ title: 'Send reminder to teams', wide: true, body: el('div', null,
+      field('Subject', subject, 'Each email is prefixed with the team name, e.g. "[Team 3] …".'),
+      field('Message', message, 'The team name, project title, guide and portfolio link are added automatically below your message.'),
+      el('label', { class: 'check' }, guides, el('span', null, 'Also send a copy (CC) to each team’s guide and co-guide')),
+      el('div', { class: 'row between', style: { margin: '10px 0 6px' } }, el('label', { class: 'f', style: { margin: 0 } }, 'Teams'), el('div', { class: 'row' }, all, none)),
+      el('div', { class: 'info-box', style: { maxHeight: '260px', overflowY: 'auto' } }, el('div', { class: 'grid g2', style: { gap: '2px 16px' } },
+        boxes.map(b => { const n = withEmail(b.t.id), m = total(b.t.id); return el('label', { class: 'check' }, b.cb, el('span', null, el('b', null, b.t.name), ' ', el('span', { class: 'badge ' + (n ? (n === m ? 'ok' : 'warn') : 'bad') }, n + '/' + m + ' emails'), b.t.title ? el('div', { class: 'tiny muted' }, b.t.title) : null)); }))),
+      el('div', { style: { marginTop: '10px' } }, count, quota)),
+      actions: [{ label: 'Cancel', fn: c => c() }, { label: 'Send reminder', cls: 'primary', fn: async c => {
+        const ids = boxes.filter(b => b.cb.checked).map(b => b.t.id);
+        if (!ids.length) { toast('Select at least one team.', 'bad'); return; }
+        if (!(await confirmBox('Send emails now?', 'Reminder emails will be sent to the members of ' + ids.length + ' team(s)' + (guides.checked ? ', with guides in CC' : '') + '.', 'Send'))) return;
+        try {
+          const r = await call('sendReminder', { teamIds: ids, subject: subject.value, message: message.value, includeGuides: guides.checked });
+          c();
+          modal({ title: 'Reminder sent', body: el('div', null,
+            el('div', { class: 'alert ok' }, icon('check'), el('div', null, el('b', null, r.teamsEmailed + ' team(s)'), ' emailed · ' + r.recipients + ' recipient(s). Emails left today: ' + r.quotaLeft + '.')),
+            r.skipped.length ? el('div', { class: 'alert warn', style: { marginTop: '10px' } }, icon('alert'), el('div', null, el('b', null, 'Skipped (add emails in Students):'), r.skipped.map(x => el('div', { class: 'small' }, x)))) : null),
+            actions: [{ label: 'OK', cls: 'primary', fn: c2 => c2() }] });
+        } catch (e) { toast(e.message, 'bad'); }
+      } }] });
   }
 
   /* ----- Gemini ----- */

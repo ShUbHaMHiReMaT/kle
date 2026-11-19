@@ -1,0 +1,229 @@
+=====================================================================
+  SETUP GUIDE - Create the EEE Mini Project Portfolio on another PC
+  (Google Apps Script)
+=====================================================================
+
+BEFORE YOU START - READ THIS FIRST
+---------------------------------
+* Google Apps Script lives on the INTERNET, not on the PC.
+  If you only want to OPEN or EDIT the same project from another PC,
+  you do NOT need to set anything up again:
+     -> Go to https://script.google.com
+     -> Log in with the SAME Google account
+     -> Your project "EEE Mini Project Portfolio" is already there.
+
+* Follow the steps below ONLY if you want a NEW copy of the project
+  (for example on a different Google account).
+  A new copy starts with an EMPTY database (see Step 9 to reuse old data).
+
+
+WHAT YOU NEED
+-------------
+1. A computer with Google Chrome (or any modern browser).
+2. A Google account. This account becomes the owner and admin.
+3. The folder  "EEE_Portfolio_App"  copied to that PC
+   (use a USB pen drive, Google Drive or email).
+4. A Gemini API key from  https://aistudio.google.com/apikey
+   (Make a NEW key. Never share it with anyone.)
+
+
+THE 7 FILES IN THE FOLDER
+-------------------------
+   File on PC          Name to type in Apps Script     Type
+   -----------         ---------------------------     ------
+   Code.gs             Code                            Script
+   Handbook.gs         Handbook                        Script
+   Seed.gs             Seed                            Script
+   Index.html          Index                           HTML
+   App.html            App                             HTML
+   Logo.html           Logo                            HTML
+   appsscript.json     (already exists)                Manifest
+
+   Open each file on the PC with Notepad (right click -> Open with
+   -> Notepad), press Ctrl+A to select all, and press Ctrl+C to copy.
+
+
+---------------------------------------------------------------------
+STEP 1 - Make a new project
+---------------------------------------------------------------------
+ 1. Open  https://script.google.com
+ 2. Log in with the Google account that should own the portfolio.
+ 3. Click  "New project".
+ 4. Click "Untitled project" at the top and rename it:
+        EEE Mini Project Portfolio
+
+
+---------------------------------------------------------------------
+STEP 2 - Show the manifest file
+---------------------------------------------------------------------
+ 1. On the left side, click the gear icon  (Project Settings).
+ 2. Tick the box:  "Show appsscript.json manifest file in editor".
+ 3. Click the  < >  icon (Editor) on the left to go back.
+
+
+---------------------------------------------------------------------
+STEP 3 - Add the files (copy and paste)
+---------------------------------------------------------------------
+ A) Code
+    - Click "Code.gs" in the file list.
+    - Delete everything inside it.
+    - Paste the contents of Code.gs.
+
+ B) Handbook, Seed  (Script files)
+    - Click the  +  next to "Files"  ->  "Script".
+    - Type the name  Handbook   (do NOT type .gs) and press Enter.
+    - Delete everything inside it and paste Handbook.gs.
+    - Do the same for  Seed  (paste Seed.gs).
+
+ C) Index, App, Logo  (HTML files)
+    - Click  +  ->  "HTML".
+    - Type the name  Index  (do NOT type .html) and press Enter.
+    - Delete everything inside it and paste Index.html.
+    - Do the same for  App  (paste App.html)
+      and for  Logo  (paste Logo.html - it is ONE very long line).
+
+ D) appsscript.json
+    - Click "appsscript.json".
+    - Delete everything inside it and paste appsscript.json.
+
+ E) Press  Ctrl + S  to save everything.
+
+ CHECK: The file list must show exactly these files:
+        appsscript.json, Code.gs, Handbook.gs, Seed.gs,
+        Index.html, App.html, Logo.html
+ The names must match exactly (capital letters too).
+
+
+---------------------------------------------------------------------
+STEP 4 - Who is the admin?  (optional)
+---------------------------------------------------------------------
+ The Google account that owns the project is ALWAYS the admin.
+ To add more admins, open  Handbook.gs  and find this line:
+
+     var ADMIN_EMAILS = ['shreyashalingali@gmail.com'];
+
+ Add more emails inside the brackets, like this:
+
+     var ADMIN_EMAILS = ['shreyashalingali@gmail.com', 'hod@kletech.ac.in'];
+
+ Press Ctrl + S.
+
+
+---------------------------------------------------------------------
+STEP 5 - Put the Gemini API key in (the secret place)
+---------------------------------------------------------------------
+ 1. Click the gear icon (Project Settings).
+ 2. Scroll down to  "Script properties"  ->  "Add script property".
+ 3. Property:   GEMINI_API_KEY
+    Value:      (paste your Gemini key)
+ 4. Click  "Save script properties".
+
+ The key stays on Google's server. It never goes into the website code.
+
+
+---------------------------------------------------------------------
+STEP 6 - Run setup once (gives permission + creates the database)
+---------------------------------------------------------------------
+ 1. Go back to the Editor and click  Code.gs.
+ 2. At the top, choose  setup  in the function list.
+ 3. Click the  Run  button.
+ 4. A window opens:
+       "Review permissions" -> choose your account
+       -> "Advanced" (small text, bottom left)
+       -> "Go to EEE Mini Project Portfolio (unsafe)"
+       -> "Allow"
+    ("Unsafe" only means Google has not checked it. It is your own code.)
+ 5. Click "Execution log". You will see links to the new
+    Google Sheet (database) and the Drive folder (evidence).
+
+ NOTE: If you see no Run button, you clicked an HTML file.
+       Click Code.gs first.
+
+
+---------------------------------------------------------------------
+STEP 7 - Publish the website
+---------------------------------------------------------------------
+ 1. Click  Deploy  ->  New deployment.
+ 2. Click the gear next to "Select type"  ->  "Web app".
+ 3. Fill in:
+      Description:     v1
+      Execute as:      Me  (your email)        <-- VERY IMPORTANT
+      Who has access:  Anyone with Google account
+                       (or "Anyone within <college domain>" if everyone
+                        uses college Google accounts)
+ 4. Click  Deploy  and copy the  Web app URL  (it ends with /exec).
+ 5. Open that URL. You should see the Dashboard as "HoD / Admin".
+
+
+---------------------------------------------------------------------
+STEP 8 - Fill in the data (inside the website)
+---------------------------------------------------------------------
+ 1. Go to  Administration  ->  Students.
+ 2. Click  "Import 2026-27 class list".
+    This adds 17 teams, 54 students (by SRN) and 11 guides.
+ 3. Add each person's email:
+       Administration -> Students -> Edit   (students)
+       Administration -> Faculty  -> Edit   (guides)
+    (Without an email, a person cannot log in or get reminders.)
+ 4. Administration -> Teams -> Edit : add titles/themes for teams
+    that do not have them yet.
+ 5. Administration -> Gemini AI -> click "Test" on the environment key.
+ 6. Administration -> "Send reminder" : sends an email to team members.
+
+
+---------------------------------------------------------------------
+STEP 9 - (Optional) Use the OLD data instead of a new empty database
+---------------------------------------------------------------------
+ Every new project makes its own new Google Sheet and Drive folder.
+ To connect the new project to the OLD data instead:
+ 1. The old owner must SHARE the old Google Sheet and the old Drive
+    folder with the new account as "Editor".
+ 2. In the new project: Project Settings -> Script properties.
+    Add (or change) these three, then save:
+       SPREADSHEET_ID      = the long ID in the old sheet's link
+                             (the part between /d/ and /edit)
+       ROOT_FOLDER_ID      = the ID at the end of the old main folder link
+       EVIDENCE_FOLDER_ID  = the ID of the "Team Evidence" folder inside it
+ 3. Run  setup  again (Step 6). It never deletes data.
+
+
+---------------------------------------------------------------------
+STEP 10 - Show it on Google Sites (optional)
+---------------------------------------------------------------------
+ 1. Open your Google Site -> Insert -> Embed -> By URL.
+ 2. Paste the /exec link -> Insert.
+ 3. Make the box full width and tall (about 900 px).
+ 4. Click Publish.
+
+
+---------------------------------------------------------------------
+WHEN YOU CHANGE THE CODE LATER
+---------------------------------------------------------------------
+ 1. Paste the new code and press Ctrl + S.
+ 2. Deploy -> Manage deployments -> pencil (Edit)
+    -> Version: "New version" -> Deploy.
+ The website link stays the SAME and no data is lost.
+
+
+---------------------------------------------------------------------
+PROBLEMS AND QUICK FIXES
+---------------------------------------------------------------------
+ Problem                                   Fix
+ ---------------------------------------   ------------------------------
+ No "Run" button                           Click Code.gs first.
+ "Script function not found: doGet"        Code.gs is missing or empty.
+ Blank white page                          Check names: Index, App, Logo.
+ Others see "needs your permission"        Deploy setting "Execute as"
+                                           must be "Me". Make a new version.
+ "Access not yet granted"                  Admin must add that email in
+                                           Faculty or Students.
+ AI Mentor not answering                   Check GEMINI_API_KEY, then
+                                           Gemini AI tab -> Test.
+ Reminder says "no member emails"          Add student emails first.
+ Reminder says "quota"                     Google allows about 100 emails
+                                           a day on a normal Gmail account.
+                                           Try again tomorrow.
+
+=====================================================================
+                               THE END
+=====================================================================
