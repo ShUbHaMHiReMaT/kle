@@ -990,7 +990,17 @@ function mentorSystem_(team, theme, stage, mode) {
   if (stage) lines.push('\n' + handbookStageText_(stage, theme));
   const modes = {
     mentor: 'MODE: open mentoring conversation. Respond to the student and guide with questions.',
-    questions: 'MODE: foundational quiz. Ask the student 3 numbered questions (one foundational concept, one about their own records/numbers, one "what if" design question) for this stage. Wait for answers; on the next turn give feedback on each answer, then ask follow-ups.',
+    quiz_ask: 'MODE: HANDBOOK QUIZ — ASK QUESTIONS. Ask exactly 5 numbered questions, labelled Q1 to Q5, that test this student\'s understanding of the HANDBOOK REQUIREMENTS FOR THIS STAGE and the theme content given above. '
+      + 'Every question must come from the handbook content in this prompt and end with its source in square brackets, e.g. [Handbook Ch.8, S3 Part A] or [Handbook Ch.6, Theme 1 core concepts]. '
+      + 'Mix: Q1–Q2 on what this stage requires and why (dependency chain, measurement before calculation, sign-off and dating rules, minimum rows, gate criteria); Q3–Q4 on the theme\'s foundational concepts / governing equations listed in the handbook; Q5 applied to the team\'s own saved records (or, if none are saved, to their artefact). '
+      + 'Questions must be answerable in 2–4 sentences. Do NOT give answers, hints or a score. If the student has done this quiz before, ask different questions. '
+      + 'Finish with exactly this line: "Type your answers as Q1: … Q2: … Q3: … Q4: … Q5: … — I will score you out of 10 against the handbook."',
+    quiz_grade: 'MODE: HANDBOOK QUIZ — MARK THE ANSWERS. The student\'s latest message answers these questions that you asked:\n<<<\n{{QUESTIONS}}\n>>>\n'
+      + 'Mark each answer 0, 1 or 2 strictly against the handbook content in this prompt: 2 = correct and specific (uses the handbook requirement, equation, units or reasoning); 1 = partly correct or vague; 0 = wrong, missing, off-topic or not answered. '
+      + 'The score is the total out of 10. Do not inflate; unanswered questions get 0. Do not give away worksheet values. '
+      + 'Reply in EXACTLY this format:\n**Handbook score: X/10** — <band: Exemplary 9–10 | Competent 7–8 | Developing 4–6 | Inadequate 0–3>\n'
+      + '- Q1 — n/2: one-line feedback; what the handbook expects (cite the handbook part)\n- Q2 — n/2: …\n- Q3 — n/2: …\n- Q4 — n/2: …\n- Q5 — n/2: …\n'
+      + '**To improve:** two short bullets.\nEnd with: "Type next for a new set of questions."',
     review: 'MODE: HANDBOOK SCORE OUT OF 10. Judge ONLY the team\'s saved records for the CURRENT STAGE, ONLY against the HANDBOOK REQUIREMENTS FOR THIS STAGE given above (worksheet parts, minimum rows, sign-off, rubric band descriptors, gate criteria). Do not use outside standards and do not invent requirements. '
       + 'Scale (handbook Ch.5 performance bands): Exemplary 9–10 (91–100%), Competent 7–8 (71–90%), Developing 4–6 (41–70%), Inadequate 0–3 (<40%). Empty or missing records for the stage = 0–1. Missing numbers/units, missing measurement methods or sources, nominal instead of measured values, broken traceability or missing sign-off must lower the score. Never inflate; use whole or half points. '
       + 'Reply in EXACTLY this format:\n**Handbook score: X/10** — <band name>\n**What the handbook requires for this stage**\n- 3 to 5 bullets, each citing the handbook part (e.g. "Handbook Ch.8, S1 Part B")\n**Assessment against the handbook**\n- one line per worksheet part: ✓ / ✗ + short evidence quoted from their records\n**Top gaps to fix next** (max 3, each citing the handbook part; never give the missing values)\n**Question for you**\n- one probing Five-Lens question.',
@@ -1084,7 +1094,16 @@ function mentorChat_(ctx, a) {
   const stage = a.stageId ? stageById_(a.stageId) : null;
   const theme = themeById_(team.themeId);
   const mode = ['mentor', 'questions', 'review', 'viva'].indexOf(a.mode) >= 0 ? a.mode : 'mentor';
-  const system = mentorSystem_(team, theme, stage, mode) + '\n\n' + teamContextText_(team, a.stageId, ctx);
+  // Handbook quiz: ask 5 questions, then mark the student's answers out of 10 (per student, per stage)
+  let promptMode = mode, quizQuestions = '';
+  if (mode === 'questions') {
+    const pending = log.filter(m => m.role === 'model' && m.mode === 'questions' && m.stageId === (a.stageId || '') && m.userEmail === ctx.email)
+      .sort((x, y) => String(x.createdAt) < String(y.createdAt) ? -1 : 1).pop();
+    const restart = msg.length < 40 && /^\s*(start|next|new|restart|again|begin)\b/i.test(msg);
+    if (pending && (pending.score === '' || pending.score === undefined || pending.score === null) && !restart) { promptMode = 'quiz_grade'; quizQuestions = String(pending.text).slice(0, 4000); }
+    else promptMode = 'quiz_ask';
+  }
+  const system = mentorSystem_(team, theme, stage, promptMode).replace('{{QUESTIONS}}', quizQuestions) + '\n\n' + teamContextText_(team, a.stageId, ctx);
 
   // Team-wise conversation history (last 12 turns)
   const hist = log.sort((x, y) => String(x.createdAt) < String(y.createdAt) ? -1 : 1).slice(-12);
@@ -1103,9 +1122,9 @@ function mentorChat_(ctx, a) {
   const reply = callGemini_(key, model, system, contents, Number(s.mentorTemperature || 0.6), 8192);
   const t = now_();
   const u = { id: uid_('mu'), teamId: team.id, stageId: a.stageId || '', mode: mode, userEmail: ctx.email, userName: ctx.name, role: 'user', text: msg, model: model, createdAt: t };
-  const r = { id: uid_('mr'), teamId: team.id, stageId: a.stageId || '', mode: mode, userEmail: ctx.email, userName: 'AI Mentor', role: 'model', text: reply, model: model, createdAt: new Date(Date.now() + 1).toISOString(), score: parseScore_(reply) };
+  const r = { id: uid_('mr'), teamId: team.id, stageId: a.stageId || '', mode: mode, userEmail: ctx.email, userName: 'AI Mentor', role: 'model', text: reply, model: model, createdAt: new Date(Date.now() + 1).toISOString(), score: promptMode === 'quiz_ask' ? '' : parseScore_(reply), phase: promptMode };
   insert_('MentorLog', u); insert_('MentorLog', r);
-  return { user: u, reply: r, usedToday: usedToday + 1, limit: s.mentorDailyLimit };
+  return { user: u, reply: r, phase: promptMode, usedToday: usedToday + 1, limit: s.mentorDailyLimit };
 }
 
 function parseScore_(text) {
