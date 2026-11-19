@@ -46,7 +46,7 @@ WHO USES IT?  (4 KINDS OF PEOPLE)
        2. Choose the stage and press "Start quiz". The AI reads what
           YOUR TEAM WROTE and asks 5 questions about it, one by one.
           (Example: "Your FR2 says 50 mV - why that number?")
-       3. You get 30 SECONDS for each question. When time is up,
+       3. You get 45 SECONDS for each question. When time is up,
           your answer is sent by itself.
        4. After EVERY answer the mentor talks back:
              correct   -> it says why it is right

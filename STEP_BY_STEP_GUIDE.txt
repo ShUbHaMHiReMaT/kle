@@ -39,7 +39,9 @@ Step 2. You will see the steps of your project:
            Project Profile, S1, S2, S3, S4, S5, S6, Debug Log, S7, Viva
 Step 3. Click "Project Profile" first.
           - Write your project title.
-          - Write your project website link (if you have one).
+          - Upload your project website as an .html file
+            in the box "Project Website (.html file)".
+            Everyone can then click "View website".
 Step 4. Click "S1". Fill the boxes and the table.
 Step 5. Click the blue "Save" button. ALWAYS SAVE!
 Step 6. Do the same for the next steps, one by one.
@@ -66,14 +68,14 @@ Step 2. Read the comments from your teacher
         for R1, R2, R3, R4 and Final.
 
 
---- D. Take the AI quiz (30 seconds per question) ---
+--- D. Take the AI quiz (45 seconds per question) ---
 
 Step 1. First SAVE your work in a stage (for example S1).
 Step 2. Click "AI Mentor" on the left side.
 Step 3. Choose the stage (for example "S1").
 Step 4. Click "Start quiz on my S1 entries".
 Step 5. The AI asks a question about what YOUR TEAM wrote.
-Step 6. You have 30 SECONDS. Type your answer.
+Step 6. You have 45 SECONDS. Type your answer.
         Press Enter (or click "Submit answer").
         If time finishes, your answer is sent by itself.
 Step 7. The AI tells you:
@@ -82,6 +84,13 @@ Step 7. The AI tells you:
                        and "The correct way to answer is ..."
 Step 8. Click "Next question". Do all 5 questions.
 Step 9. You get a score out of 10.
+
+--- D2. Ask the AI Mentor your own question ---
+
+Step 1. In AI Mentor, choose "Ask the mentor a question".
+Step 2. Type your question (for example: "Why must I measure L first?").
+Step 3. Press Enter. The mentor explains and asks you a small question back.
+   TIP: After any quiz answer, click "Ask about this answer".
 
         9 or 10 = Excellent
         7 or 8  = Good

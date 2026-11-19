@@ -398,6 +398,7 @@ const ACTIONS = {
   quizStart:    { roles: ['student'], write: true, ai: true, fn: (c, a) => quizStart_(c, a) },
   quizAnswer:   { roles: ['student'], write: true, ai: true, fn: (c, a) => quizAnswer_(c, a) },
   quizNext:     { roles: ['student'], write: true, fn: (c, a) => quizNext_(c, a) },
+  viewHtml:     { roles: ['admin', 'coordinator', 'faculty', 'student'], fn: (c, a) => viewHtml_(c, a) },
   mentorNote:   { roles: ['admin', 'coordinator', 'faculty'], write: true, fn: (c, a) => mentorNote_(c, a) },
   // student's own Gemini key (stored server-side only)
   myKeyStatus:  { roles: ['student'], fn: (c, a) => myKeyStatus_(c) },
@@ -424,7 +425,13 @@ const ACTIONS = {
   listModels:   { roles: ['admin'], fn: (c, a) => listModels_(c, a) },
   assignKeys:   { roles: ['admin'], write: true, fn: (c, a) => assignKeys_(c, a) },
   saveSettings: { roles: ['admin'], write: true, fn: (c, a) => saveSettings_(c, a) },
-  auditLog:     { roles: ['admin', 'coordinator'], fn: (c, a) => all_('Audit').slice(-300).reverse() }
+  auditLog:     { roles: ['admin', 'coordinator'], fn: (c, a) => auditView_(c) },
+  // HoD / Admin: delete or reset anything
+  deleteComment:{ roles: ['admin'], write: true, fn: (c, a) => deleteComment_(c, a) },
+  deleteReview: { roles: ['admin'], write: true, fn: (c, a) => deleteReview_(c, a) },
+  deleteMentorMsg:{ roles: ['admin'], write: true, fn: (c, a) => deleteMentorMsg_(c, a) },
+  clearSection: { roles: ['admin'], write: true, fn: (c, a) => clearSection_(c, a) },
+  deleteTeam:   { roles: ['admin'], write: true, fn: (c, a) => deleteTeam_(c, a) }
 };
 
 /** Single public RPC entry: google.script.run.api({token, action, args}) */
@@ -518,7 +525,7 @@ function progress_(team, stages, recs, evs, members) {
     (st.sections || []).forEach(sec => {
       if (sec.type === 'info') return;
       total++;
-      if (sec.type === 'evidence') { if (evs.some(e => e.sectionId === sec.id)) done++; return; }
+      if (sec.type === 'evidence') { if (sec.optional) { total--; return; } if (evs.some(e => e.sectionId === sec.id)) done++; return; }
       if (sec.individual) {
         if (!members.length) return;
         const n = members.filter(m => sectionComplete_(sec, recordData_(recs.filter(r => r.sectionId === sec.id && r.owner === String(m.email).toLowerCase())[0]), theme)).length;
@@ -578,13 +585,13 @@ function getTeam_(ctx, teamId) {
   const records = {};
   visibleRecs.forEach(r => {
     records[r.sectionId + (r.owner ? '|' + r.owner : '')] = {
-      sectionId: r.sectionId, owner: r.owner, data: recordData_(r), createdAt: r.createdAt, createdBy: r.createdBy,
-      updatedAt: r.updatedAt, updatedBy: r.updatedBy, version: Number(r.version || 0), lockedAt: r.lockedAt, lockedBy: r.lockedBy,
-      signatures: safeJson_(r.signatures, [])
+      sectionId: r.sectionId, owner: r.owner, data: recordData_(r), createdAt: r.createdAt, createdBy: mask_(r.createdBy, ctx),
+      updatedAt: r.updatedAt, updatedBy: mask_(r.updatedBy, ctx), version: Number(r.version || 0), lockedAt: r.lockedAt, lockedBy: mask_(r.lockedBy, ctx),
+      signatures: safeJson_(r.signatures, []).map(x => Object.assign({}, x, { email: mask_(x.email, ctx) }))
     };
   });
-  const evidence = where_('Evidence', 'teamId', teamId).filter(e => !bool_(e.deleted)).map(e => ({ id: e.id, stageId: e.stageId, sectionId: e.sectionId, name: e.name, mimeType: e.mimeType, size: e.size, url: e.url, caption: e.caption, uploadedBy: e.uploadedBy, uploadedAt: e.uploadedAt }));
-  const comments = where_('Comments', 'teamId', teamId).map(c => ({ id: c.id, stageId: c.stageId, sectionId: c.sectionId, authorName: c.authorName, authorEmail: c.authorEmail, role: c.role, text: c.text, createdAt: c.createdAt }));
+  const evidence = where_('Evidence', 'teamId', teamId).filter(e => !bool_(e.deleted)).map(e => ({ id: e.id, stageId: e.stageId, sectionId: e.sectionId, name: e.name, mimeType: e.mimeType, size: e.size, url: e.url, caption: e.caption, uploadedBy: mask_(e.uploadedBy, ctx), uploadedAt: e.uploadedAt }));
+  const comments = where_('Comments', 'teamId', teamId).map(c => ({ id: c.id, stageId: c.stageId, sectionId: c.sectionId, authorName: c.authorName, authorEmail: mask_(c.authorEmail, ctx), role: c.role, text: c.text, createdAt: c.createdAt }));
   const showMarks = ctx.role !== 'student' || settings_().showMarksToStudents;
   const reviews = where_('Reviews', 'teamId', teamId).map(r => ({
     id: r.id, reviewId: r.reviewId, facultyName: r.facultyName, gate: safeJson_(r.gateJson, {}), bands: safeJson_(r.bandsJson, {}),
@@ -684,7 +691,7 @@ function saveRecord_(ctx, a) {
   if (existing && Number(a.version || 0) && Number(existing.version || 0) !== Number(a.version)) {
     throw new Error('CONFLICT: A teammate saved this section after you opened it. Reload the section, then re-apply your changes.');
   }
-  if (existing && existing.lockedAt) data = mergeLocked_(sec, recordData_(existing) || {}, data);
+  if (existing && existing.lockedAt && ctx.role !== 'admin') data = mergeLocked_(sec, recordData_(existing) || {}, data);   // HoD/Admin may edit anything
 
   const t = now_();
   const row = Object.assign({ key: key, teamId: team.id, stageId: f.stage.id, sectionId: sec.id, owner: owner, updatedAt: t, updatedBy: ctx.email }, chunks_(data));
@@ -799,7 +806,12 @@ function uploadEvidence_(ctx, a) {
   const bytes = Utilities.base64Decode(b64);
   if (bytes.length > MAX_UPLOAD_BYTES) throw new Error('File exceeds 10 MB. Upload large files to Drive and add them as a link.');
   const name = clean_(a.name, 200) || 'evidence';
-  const blob = Utilities.newBlob(bytes, clean_(a.mimeType, 100) || 'application/octet-stream', name);
+  if (f.section.accept) {
+    const exts = String(f.section.accept).split(',').map(x => x.trim().toLowerCase());
+    if (!exts.some(x => name.toLowerCase().endsWith(x))) throw new Error('This box only accepts ' + exts.join(' / ') + ' files.');
+  }
+  const isHtml = /\.html?$/i.test(name);
+  const blob = Utilities.newBlob(bytes, isHtml ? 'text/html' : (clean_(a.mimeType, 100) || 'application/octet-stream'), name);
   const file = stageFolder_(team, f.stage).createFile(blob);
   file.setDescription(f.stage.code + ' / ' + f.section.title + ' — uploaded by ' + ctx.email + ' on ' + now_());
   const e = { id: uid_('ev'), teamId: team.id, stageId: f.stage.id, sectionId: f.section.id, fileId: file.getId(), name: name, mimeType: blob.getContentType(),
@@ -1040,7 +1052,7 @@ function mentorSystem_(team, theme, stage, mode) {
   }
   if (stage) lines.push('\n' + handbookStageText_(stage, theme));
   const modes = {
-    mentor: 'MODE: open mentoring conversation. Respond to the student and guide with questions.',
+    mentor: 'MODE: STUDENT ASKS A QUESTION. Answer the student\'s question clearly and correctly in simple English (under 200 words), using their saved work and the handbook content in this prompt; cite the handbook part when you state a requirement. You MAY explain concepts, equations, methods and why something is right or wrong. You must NOT write their worksheet entries, final component values or report text for them — instead show the method and let them apply it. If the question is about a quiz answer, explain the correct way to answer. End with one short follow-up question that checks they understood.',
     quiz_ask: 'MODE: HANDBOOK QUIZ — ASK QUESTIONS. Ask exactly 5 numbered questions, labelled Q1 to Q5, that test this student\'s understanding of the HANDBOOK REQUIREMENTS FOR THIS STAGE and the theme content given above. '
       + 'Every question must come from the handbook content in this prompt and end with its source in square brackets, e.g. [Handbook Ch.8, S3 Part A] or [Handbook Ch.6, Theme 1 core concepts]. '
       + 'Mix: Q1–Q2 on what this stage requires and why (dependency chain, measurement before calculation, sign-off and dating rules, minimum rows, gate criteria); Q3–Q4 on the theme\'s foundational concepts / governing equations listed in the handbook; Q5 applied to the team\'s own saved records (or, if none are saved, to their artefact). '
@@ -1197,7 +1209,7 @@ function mentorHistory_(ctx, a) {
   return where_('MentorLog', 'teamId', team.id)
     .sort((x, y) => String(x.createdAt) < String(y.createdAt) ? -1 : 1)
     .slice(-Math.min(Number(a.limit) || 200, 500))
-    .map(m => ({ id: m.id, stageId: m.stageId, mode: m.mode, userName: m.userName, userEmail: m.userEmail, role: m.role, text: m.text, model: m.model, createdAt: m.createdAt, facultyNote: m.facultyNote, noteBy: m.noteBy, score: m.score }));
+    .map(m => ({ id: m.id, stageId: m.stageId, mode: m.mode, userName: m.userName, userEmail: mask_(m.userEmail, ctx), role: m.role, text: m.text, model: m.model, createdAt: m.createdAt, facultyNote: m.facultyNote, noteBy: m.noteBy, score: m.score }));
 }
 function mentorNote_(ctx, a) {
   const m = one_('MentorLog', 'id', a.id);
@@ -1458,7 +1470,7 @@ function deleteMyKey_(ctx) {
  * 30 s per question (checked on the server), mentor feedback after every
  * answer ("You answered … but … The correct way is …"), total score /10.
  * ========================================================================== */
-const QUIZ = { questions: 5, seconds: 30, grace: 8 };
+const QUIZ = { questions: 5, seconds: 45, grace: 8 };
 
 /** Key, model and daily-limit check shared by mentor features. */
 function mentorAccess_(ctx, team) {
@@ -1543,7 +1555,7 @@ function quizStart_(ctx, a) {
     logMentor_(ctx, team.id, stage.id, 'model', '**Question 1 of ' + qs.length + '** (' + QUIZ.seconds + ' s)' + (qs[0].entry ? ' — about *' + qs[0].entry + '*' : '') + '\n' + qs[0].q, m.model, '', 1)
   ];
   audit_(ctx, 'quizStart', team.id, stage.code);
-  return { quizId: id, index: 0, total: qs.length, question: qs[0].q, entry: qs[0].entry, seconds: QUIZ.seconds, log: log };
+  return { quizId: id, index: 0, total: qs.length, question: qs[0].q, entry: qs[0].entry, seconds: QUIZ.seconds, limit: QUIZ.seconds, log: log };
 }
 
 function quizAnswer_(ctx, a) {
@@ -1623,9 +1635,84 @@ function quizNext_(ctx, a) {
   const i = Number(q.current || 0);
   if (i >= qs.length) throw new Error('No more questions.');
   if (q.askedAt) {   // already open (e.g. page refresh): keep the original start time
-    return { quizId: q.id, index: i, total: qs.length, question: qs[i].q, entry: qs[i].entry, seconds: Math.max(0, QUIZ.seconds - Math.round((Date.now() - new Date(q.askedAt).getTime()) / 1000)), log: [] };
+    return { quizId: q.id, index: i, total: qs.length, question: qs[i].q, entry: qs[i].entry, seconds: Math.max(0, QUIZ.seconds - Math.round((Date.now() - new Date(q.askedAt).getTime()) / 1000)), limit: QUIZ.seconds, log: [] };
   }
   update_('Quizzes', q._row, { askedAt: now_() });
   const log = [logMentor_(ctx, team.id, q.stageId, 'model', '**Question ' + (i + 1) + ' of ' + qs.length + '** (' + QUIZ.seconds + ' s)' + (qs[i].entry ? ' — about *' + qs[i].entry + '*' : '') + '\n' + qs[i].q, q.model, '', 0)];
-  return { quizId: q.id, index: i, total: qs.length, question: qs[i].q, entry: qs[i].entry, seconds: QUIZ.seconds, log: log };
+  return { quizId: q.id, index: i, total: qs.length, question: qs[i].q, entry: qs[i].entry, seconds: QUIZ.seconds, limit: QUIZ.seconds, log: log };
+}
+
+
+/* ============================================================================
+ * PROJECT WEBSITE (.html) — returns the file so the app can show it in a
+ * sandboxed frame (scripts in it cannot touch the portfolio or its data).
+ * ========================================================================== */
+function viewHtml_(ctx, a) {
+  const e = one_('Evidence', 'id', a.id);
+  if (!e || bool_(e.deleted)) throw new Error('Website file not found.');
+  teamAccess_(ctx, e.teamId, 'read');
+  if (!/\.html?$/i.test(String(e.name)) || !e.fileId) throw new Error('This file is not an .html website.');
+  const blob = DriveApp.getFileById(e.fileId).getBlob();
+  if (blob.getBytes().length > 5 * 1024 * 1024) throw new Error('The website file is larger than 5 MB. Open it from Drive instead.');
+  return { name: e.name, html: blob.getDataAsString('UTF-8'), uploadedBy: e.uploadedBy, uploadedAt: e.uploadedAt };
+}
+
+
+/* ============================================================================
+ * HIDDEN ADMINS + HoD/ADMIN "DELETE ANYTHING" TOOLS
+ * ========================================================================== */
+function isHiddenAdmin_(email) {
+  return (typeof HIDDEN_ADMIN_EMAILS !== 'undefined' ? HIDDEN_ADMIN_EMAILS : []).map(e => String(e).toLowerCase()).indexOf(String(email || '').toLowerCase()) >= 0;
+}
+function auditView_(ctx) {
+  return all_('Audit').filter(r => !isHiddenAdmin_(r.email) || r.email === ctx.email).slice(-300).reverse();
+}
+function deleteComment_(ctx, a) {
+  const c = one_('Comments', 'id', a.id);
+  if (!c) throw new Error('Comment not found.');
+  remove_('Comments', c._row);
+  audit_(ctx, 'deleteComment', c.teamId, c.sectionId + ': ' + String(c.text).slice(0, 80));
+  return true;
+}
+function deleteReview_(ctx, a) {
+  const r = where_('Reviews', 'teamId', a.teamId).filter(x => x.reviewId === a.reviewId)[0];
+  if (!r) throw new Error('This review has not been saved yet.');
+  remove_('Reviews', r._row);
+  audit_(ctx, 'deleteReview', a.teamId, a.reviewId);
+  return true;
+}
+function deleteMentorMsg_(ctx, a) {
+  const m = one_('MentorLog', 'id', a.id);
+  if (!m) throw new Error('Message not found.');
+  remove_('MentorLog', m._row);
+  audit_(ctx, 'deleteMentorMsg', m.teamId, String(m.text).slice(0, 80));
+  return true;
+}
+/** Clears a worksheet section (team copy, or one student's individual copy). */
+function clearSection_(ctx, a) {
+  const f = findSection_(a.stageId, a.sectionId);
+  const owner = f.section.individual ? clean_(a.owner).toLowerCase() : '';
+  const rec = one_('Records', 'key', recordKey_(a.teamId, f.section.id, owner));
+  if (!rec) throw new Error('Nothing saved in this section yet.');
+  remove_('Records', rec._row);
+  audit_(ctx, 'clearSection', a.teamId, f.section.id + (owner ? ' (' + owner + ')' : ''));
+  return true;
+}
+/** Permanently deletes a team: students become unassigned; the team's saved work is removed. */
+function deleteTeam_(ctx, a) {
+  const t = one_('Teams', 'id', a.id);
+  if (!t) throw new Error('Team not found.');
+  if (clean_(a.confirm) !== t.name) throw new Error('Type the exact team name to confirm deletion.');
+  all_('Students').filter(s => s.teamId === t.id).forEach(s => update_('Students', s._row, { teamId: '', updatedAt: now_() }));
+  ['Records', 'Comments', 'Reviews', 'MentorLog', 'Evidence', 'Quizzes'].forEach(name => {
+    where_(name, 'teamId', t.id).sort((x, y) => y._row - x._row).forEach(r => remove_(name, r._row));   // bottom-up keeps row numbers valid
+  });
+  remove_('Teams', one_('Teams', 'id', t.id)._row);
+  audit_(ctx, 'deleteTeam', '', t.name);
+  return all_('Teams').map(strip_);
+}
+
+/** Hide hidden-admin emails from everyone except that admin. */
+function mask_(email, ctx) {
+  return email && isHiddenAdmin_(email) && (!ctx || String(ctx.email).toLowerCase() !== String(email).toLowerCase()) ? 'Portfolio Administrator' : email;
 }

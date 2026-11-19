@@ -536,7 +536,15 @@
     else drawInfo(pane);
   }
 
+  function viewWebsite(e) {
+    const frame = el('iframe', { title: 'Project website', sandbox: 'allow-scripts allow-popups allow-forms', referrerpolicy: 'no-referrer', style: { width: '100%', height: '70vh', border: '1px solid var(--line)', borderRadius: '10px', background: '#fff' } });
+    const m = modal({ title: 'Project website — ' + e.name, wide: true, body: el('div', null, el('div', { class: 'small muted', style: { marginBottom: '8px' } }, 'Uploaded by ' + e.uploadedBy + ' · ' + fmt(e.uploadedAt) + ' · shown in a safe sandbox'), frame), actions: [{ label: 'Close', fn: c => c() }] });
+    frame.srcdoc = '<p style="font-family:sans-serif;padding:20px">Loading website…</p>';
+    call('viewHtml', { id: e.id }).then(r => { frame.srcdoc = r.html; }).catch(x => { m.close(); toast(x.message, 'bad'); });
+  }
   function websiteLink() {
+    const site = (S.team.evidence || []).filter(e => e.sectionId === 'P-WEB' && /\.html?$/i.test(e.name)).pop();
+    if (site) return el('div', { style: { marginTop: '6px' } }, el('button', { class: 'btn sm primary', onclick: () => viewWebsite(site) }, icon('link'), 'View project website'));
     const r = S.team.records['P-NEED'];
     const url = r && r.data && r.data.values ? String(r.data.values.website || '') : '';
     if (!/^https?:\/\//i.test(url)) return null;   // only http(s) links are ever rendered
@@ -641,7 +649,7 @@
     const owner = ownerFor(sec);
     const key = recKey(sec, owner);
     const rec = T.records[key];
-    const locked = !!(rec && rec.lockedAt);
+    const locked = !!(rec && rec.lockedAt) && u.role !== 'admin';   // HoD/Admin can edit anything, even signed sections
     const editable = canEditStage(stage) && (!sec.individual || u.role === 'student' || u.role === 'admin');
     const draft = rec && rec.data ? JSON.parse(JSON.stringify(rec.data)) : (sec.type === 'table' ? { rows: initialRows(sec) } : { values: {} });
     const markDirty = () => { S.dirty[key] = true; status.textContent = 'Unsaved changes'; status.className = 'small'; status.style.color = 'var(--warn)'; };
@@ -668,6 +676,11 @@
       };
       foot.appendChild(save);
     }
+    if (u.role === 'admin' && rec) foot.appendChild(el('button', { class: 'btn danger sm', title: 'Delete everything saved in this section', onclick: async () => {
+      if (!(await confirmBox('Clear this section', 'Delete everything saved in "' + sec.title + '"' + (sec.individual ? ' for this student' : '') + '? This cannot be undone.', 'Delete', true))) return;
+      try { await call('clearSection', { teamId: T.team.id, stageId: stage.id, sectionId: sec.id, owner: owner }); delete T.records[key]; delete S.dirty[key]; toast('Section cleared.', 'ok'); card.replaceWith(drawSection(stage, sec)); refreshProgress(); }
+      catch (e) { toast(e.message, 'bad'); }
+    } }, icon('trash'), 'Clear'));
     if (sec.lock && !sec.individual) foot.appendChild(renderLock(stage, sec, rec, editable));
     card.appendChild(foot);
     card.appendChild(renderComments(stage, sec));
@@ -820,6 +833,7 @@
         el('div', { style: { flex: 1, minWidth: 0 } },
           el('a', { class: 'n', href: e.url, target: '_blank', rel: 'noopener noreferrer' }, e.name),
           e.caption ? el('div', { class: 'small' }, e.caption) : null,
+          /\.html?$/i.test(e.name) ? el('button', { class: 'btn sm primary', style: { marginTop: '6px' }, onclick: () => viewWebsite(e) }, icon('link'), 'View website') : null,
           el('div', { class: 'tiny muted' }, (e.size ? Math.round(e.size / 1024) + ' KB · ' : '') + fmt(e.uploadedAt) + ' · ' + e.uploadedBy)),
         editable && (u.role === 'admin' || e.uploadedBy === u.email) ? el('button', { class: 'btn ghost sm', title: 'Remove', 'aria-label': 'Remove evidence', onclick: async () => {
           if (!(await confirmBox('Remove evidence', 'Remove "' + e.name + '" from the portfolio? The Drive file is kept for audit.', 'Remove', true))) return;
@@ -830,8 +844,8 @@
     wrap.appendChild(list);
     if (editable) {
       const caption = el('input', { type: 'text', placeholder: 'Caption (optional) — e.g. "Step-load response, 10→100% load, 20 MHz BW"' });
-      const file = el('input', { type: 'file', multiple: true, class: 'hidden', accept: 'image/*,application/pdf,.csv,.xlsx,.xls,.docx,.doc,.pptx,.txt,.zip,.ino,.c,.h,.py,.m,.json,video/*' });
-      const drop = el('div', { class: 'drop', tabindex: '0', role: 'button' }, icon('upload'), el('div', null, el('b', null, 'Click to upload'), ' or drag files here'), el('div', { class: 'tiny' }, 'Images, PDF, data, code · max 10 MB each'));
+      const file = el('input', { type: 'file', multiple: !sec.accept, class: 'hidden', accept: sec.accept || 'image/*,application/pdf,.csv,.xlsx,.xls,.docx,.doc,.pptx,.txt,.zip,.ino,.c,.h,.py,.m,.json,video/*' });
+      const drop = el('div', { class: 'drop', tabindex: '0', role: 'button' }, icon('upload'), el('div', null, el('b', null, 'Click to upload'), ' or drag files here'), el('div', { class: 'tiny' }, sec.accept ? 'Only ' + sec.accept.split(',').join(' / ') + ' files · max 10 MB' : 'Images, PDF, data, code · max 10 MB each'));
       drop.onclick = () => file.click();
       drop.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); file.click(); } };
       drop.ondragover = e => { e.preventDefault(); drop.classList.add('over'); };
@@ -841,6 +855,7 @@
       async function upload(files) {
         for (const f of Array.from(files || [])) {
           if (f.size > 10 * 1024 * 1024) { toast(f.name + ' exceeds 10 MB — add it as a Drive link instead.', 'bad'); continue; }
+          if (sec.accept && !sec.accept.split(',').some(x => f.name.toLowerCase().endsWith(x.trim()))) { toast('Please choose a ' + sec.accept.split(',').join(' / ') + ' file.', 'bad'); continue; }
           const t = el('div', { class: 'small muted' }, 'Uploading ' + f.name + '…'); list.appendChild(t);
           try {
             const b64 = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1] || ''); r.onerror = () => rej(new Error('Could not read file.')); r.readAsDataURL(f); });
@@ -875,7 +890,11 @@
       if (!open) return;
       items().forEach(c => box.appendChild(el('div', { class: 'cmt ' + (c.role !== 'student' ? 'faculty' : '') },
         el('div', { class: 'avatar' }, initials(c.authorName)),
-        el('div', { style: { flex: 1, minWidth: 0 } }, el('div', { class: 'tiny muted' }, el('b', null, c.authorName), ' · ' + (ROLE[c.role] || c.role) + ' · ' + fmt(c.createdAt)), el('div', { class: 'bubble selectable' }, c.text)))));
+        el('div', { style: { flex: 1, minWidth: 0 } }, el('div', { class: 'tiny muted' }, el('b', null, c.authorName), ' · ' + (ROLE[c.role] || c.role) + ' · ' + fmt(c.createdAt)), el('div', { class: 'bubble selectable' }, c.text)),
+        S.boot.user.role === 'admin' ? el('button', { class: 'btn ghost sm', title: 'Delete comment', 'aria-label': 'Delete comment', onclick: async () => {
+          if (!(await confirmBox('Delete comment', 'Delete this comment permanently?', 'Delete', true))) return;
+          try { await call('deleteComment', { id: c.id }); T.comments = T.comments.filter(x => x.id !== c.id); draw(); } catch (e) { toast(e.message, 'bad'); }
+        } }, icon('trash')) : null)));
       const ta = el('textarea', { placeholder: S.boot.user.role === 'student' ? 'Reply to your guide…' : 'Review comment for the team (use the Five Lenses)…', rows: 2 });
       const b = el('button', { class: 'btn primary sm' }, icon('send'), 'Post');
       b.onclick = async () => {
@@ -988,7 +1007,11 @@
             await loadTeam(); toast('Review saved.', 'ok'); drawTeam();
           } catch (e) { busy(save, false); toast(e.message, 'bad'); }
         };
-        card.appendChild(el('div', { class: 'sec-foot' }, el('span', { class: 'small muted', style: { flex: 1 } }, r.updatedAt ? 'Last saved ' + fmt(r.updatedAt) + ' by ' + r.facultyName : 'Not reviewed yet'), save));
+        const delRev = u.role === 'admin' && r.id ? el('button', { class: 'btn danger sm', onclick: async () => {
+          if (!(await confirmBox('Delete review', 'Delete the saved ' + rv.name + ' (marks, grades, decision and feedback)? This cannot be undone.', 'Delete', true))) return;
+          try { await call('deleteReview', { teamId: T.team.id, reviewId: rv.id }); await loadTeam(); toast('Review deleted.', 'ok'); drawTeam(); } catch (e) { toast(e.message, 'bad'); }
+        } }, icon('trash'), 'Delete review') : null;
+        card.appendChild(el('div', { class: 'sec-foot' }, delRev, el('span', { class: 'small muted', style: { flex: 1 } }, r.updatedAt ? 'Last saved ' + fmt(r.updatedAt) + ' by ' + r.facultyName : 'Not reviewed yet'), save));
       }
       pane.appendChild(card);
     });
@@ -1037,12 +1060,12 @@
     const isStudent = u.role === 'student';
     const stages = stageList();
     const stageSel = select(stages.map(s => ({ v: s.id, l: s.code + ' — ' + s.title })), S.stageId || (stages[0] || {}).id);
-    const modeOpts = (isStudent ? [{ v: 'quiz', l: 'Timed quiz on my saved work — 30 s per question, score /10' }] : [])
-      .concat([{ v: 'review', l: 'Score my saved work /10 (handbook rubric)' }, { v: 'mentor', l: 'Mentoring conversation' }, { v: 'viva', l: 'Mock viva — Five Lenses' }]);
+    const modeOpts = (isStudent ? [{ v: 'quiz', l: 'Timed quiz on my saved work — 45 s per question, score /10' }, { v: 'mentor', l: 'Ask the mentor a question' }] : [{ v: 'mentor', l: 'Ask the mentor a question' }])
+      .concat([{ v: 'review', l: 'Score my saved work /10 (handbook rubric)' }, { v: 'viva', l: 'Mock viva — Five Lenses' }]);
     const modeSel = select(modeOpts, isStudent ? 'quiz' : 'review');
     const filter = u.role !== 'student' ? select([{ v: '', l: 'All stages' }].concat(stages.map(s => ({ v: s.id, l: s.code }))), '') : null;
     const log = el('div', { class: 'chat-log', 'aria-live': 'polite' });
-    const input = el('textarea', { placeholder: 'Ask about your design or a concept… (Enter to send, Shift+Enter for a new line)', rows: 2, disabled: !canChat });
+    const input = el('textarea', { placeholder: 'Type your question for the mentor… e.g. “Why must I measure L before calculating?” (Enter to send)', rows: 2, disabled: !canChat });
     const send = el('button', { class: 'btn primary', disabled: !canChat }, icon('send'), el('span', { class: 'hide-sm' }, 'Send'));
     const usage = el('span', { class: 'tiny muted' });
     const stageCode = () => (stages.filter(s => s.id === stageSel.value)[0] || {}).code || '';
@@ -1060,6 +1083,12 @@
           if (n === null) return;
           try { await call('mentorNote', { id: m.id, note: n }); m.facultyNote = n; m.noteBy = u.name; drawLog(); } catch (e) { toast(e.message, 'bad'); }
         } }, icon('edit'), m.facultyNote ? 'Edit note' : 'Add note'));
+      }
+      if (m.id && u.role === 'admin') {
+        node.appendChild(el('button', { class: 'btn ghost sm', style: { alignSelf: isUser ? 'flex-end' : 'flex-start' }, title: 'Delete message', onclick: async () => {
+          if (!(await confirmBox('Delete message', 'Delete this AI Mentor message permanently?', 'Delete', true))) return;
+          try { await call('deleteMentorMsg', { id: m.id }); S.mentor = S.mentor.filter(x => x.id !== m.id); S.mentor._team = T.team.id; drawLog(); } catch (e) { toast(e.message, 'bad'); }
+        } }, icon('trash'), 'Delete'));
       }
       return node;
     };
@@ -1112,7 +1141,8 @@
         el('div', null, el('b', null, 'Timed quiz on what your team wrote in ' + stageCode()),
           el('ul', { class: 'small muted', style: { margin: '6px 0 0', paddingLeft: '18px' } },
             el('li', null, 'The mentor reads your saved ' + stageCode() + ' entries and asks 5 questions about them, one at a time.'),
-            el('li', null, 'You have 30 seconds for each question. When time runs out, your answer is sent automatically.'),
+            el('li', null, 'You have 45 seconds for each question. When time runs out, your answer is sent automatically.'),
+            el('li', null, 'You can also ask the mentor your own questions — choose “Ask the mentor a question” above, or click “Ask about this answer” after any question.'),
             el('li', null, 'After every answer the mentor tells you what was right or wrong and shows the correct way to answer.'),
             el('li', null, 'At the end you get a score out of 10. Typing only — pasting is disabled.'))),
         el('div', null, start)));
@@ -1127,7 +1157,7 @@
       clear(quizBox).appendChild(el('div', { class: 'stack' },
         el('div', { class: 'row between' }, el('span', { class: 'badge brand' }, 'Question ' + (r.index + 1) + ' of ' + r.total), r.entry ? el('span', { class: 'badge' }, 'About: ' + r.entry) : null, el('span', { style: { flex: 1 } }), secs),
         bar, el('div', { class: 'quiz-q selectable' }, r.question), ans, el('div', { class: 'row' }, submit, el('span', { class: 'tiny muted' }, 'Answer in 1–2 sentences.'))));
-      const deadline = Date.now() + r.seconds * 1000, full = 30;
+      const full = r.limit || r.seconds, deadline = Date.now() + r.seconds * 1000;
       let sent = false;
       const fire = auto => { if (sent) return; sent = true; stopTimer(); answer(ans.value.trim(), auto, submit, ans); };
       timer = setInterval(() => {
@@ -1160,7 +1190,8 @@
       const body = el('div', { class: 'stack' },
         el('div', { class: 'row' }, el('span', { class: 'badge ' + cls }, (r.mark === 2 ? '✅ ' : r.mark === 1 ? '🟡 ' : '❌ ') + r.mark + '/2 — ' + r.verdict), el('span', { class: 'tiny muted' }, r.late ? 'Time ran out' : 'Answered in ' + r.seconds + ' s')),
         r.feedback ? el('div', { class: 'selectable' }, r.feedback) : null,
-        r.correct ? el('div', { class: 'alert ok', style: { display: 'block' } }, el('b', null, 'The correct way to answer: '), r.correct) : null);
+        r.correct ? el('div', { class: 'alert ok', style: { display: 'block' } }, el('b', null, 'The correct way to answer: '), r.correct) : null,
+        el('div', null, el('button', { class: 'btn sm', onclick: () => askAbout(r) }, icon('msg'), 'Ask about this answer')));
       if (r.done) {
         setScore(stageSel.value, r.score);
         const again = el('button', { class: 'btn primary', onclick: quizIdle }, icon('refresh'), 'Start a new quiz');
@@ -1176,11 +1207,19 @@
           try { const q = await call('quizNext', { quizId: QZ.id }); pushLog(q.log); showQuestion(q); }
           catch (e) { busy(next, false); toast(e.message, 'bad'); }
         };
-        body.appendChild(el('div', null, next, el('span', { class: 'tiny muted', style: { marginLeft: '10px' } }, 'The 30 seconds start when you open the next question.')));
+        body.appendChild(el('div', null, next, el('span', { class: 'tiny muted', style: { marginLeft: '10px' } }, 'Your 45 seconds start when you open the next question.')));
       }
       clear(quizBox).appendChild(body);
     };
 
+    // switch to 'Ask the mentor' with the quiz question as context (student still types the question)
+    const askAbout = r => {
+      const q = (S.mentor || []).filter(m => m.mode === 'quiz' && m.role === 'model' && /^\*\*Question/.test(m.text || '')).pop();
+      modeSel.value = 'mentor'; applyMode();
+      input.value = 'About quiz question ' + (r.index + 1) + (q ? ' ("' + String(q.text).split('\n').slice(1).join(' ').slice(0, 140) + '")' : '') + ': ';
+      input.focus(); input.setSelectionRange(input.value.length, input.value.length);
+      toast('Now type your question and press Enter.', 'ok');
+    };
     const applyMode = () => {
       const quiz = modeSel.value === 'quiz';
       chatIn.style.display = quiz ? 'none' : '';
@@ -1370,7 +1409,12 @@
           el('button', { class: 'btn sm', onclick: () => go('team', { teamId: t.id, tab: 'portfolio', stageId: null }) }, icon('folder'), 'Open'),
           el('button', { class: 'btn sm', onclick: () => editTeam(t) }, icon('edit'), 'Edit'),
           t.status !== 'Archived' ? el('button', { class: 'btn sm', title: 'Email a reminder to this team', onclick: () => reminderModal([t.id]) }, icon('send'), 'Remind') : null,
-          el('button', { class: 'btn sm ' + (t.status === 'Archived' ? '' : 'danger'), onclick: async () => { const r = t.status === 'Archived'; if (!r && !(await confirmBox('Archive team', 'Archive ' + t.name + '? All records are preserved; the team becomes read-only and hidden from guides.', 'Archive', true))) return; try { A().teams = await call('archiveTeam', { id: t.id, restore: r }); drawAdmin(); } catch (e) { toast(e.message, 'bad'); } } }, t.status === 'Archived' ? 'Restore' : 'Archive'))));
+          el('button', { class: 'btn sm ' + (t.status === 'Archived' ? '' : 'danger'), onclick: async () => { const r = t.status === 'Archived'; if (!r && !(await confirmBox('Archive team', 'Archive ' + t.name + '? All records are preserved; the team becomes read-only and hidden from guides.', 'Archive', true))) return; try { A().teams = await call('archiveTeam', { id: t.id, restore: r }); drawAdmin(); } catch (e) { toast(e.message, 'bad'); } } }, t.status === 'Archived' ? 'Restore' : 'Archive'),
+          S.boot.user.role === 'admin' ? el('button', { class: 'btn sm danger', title: 'Delete team permanently', onclick: async () => {
+            const name = await promptBox('Delete ' + t.name + ' permanently', 'This deletes the team and ALL its saved work, reviews, comments, uploads list and AI Mentor history. Students become unassigned. Type the team name exactly to confirm:', { required: true, ok: 'Delete permanently' });
+            if (name === null) return;
+            try { A().teams = await call('deleteTeam', { id: t.id, confirm: name }); S.admin = await call('adminData'); drawAdmin(); toast(t.name + ' deleted.', 'ok'); } catch (e) { toast(e.message, 'bad'); }
+          } }, icon('trash'), 'Delete') : null)));
     });
     pane.appendChild(tableCard('Teams (' + A().teams.length + ')', el('button', { class: 'btn primary', onclick: () => editTeam({}) }, icon('plus'), 'Create team'), ['Team', 'Theme / Artefact', 'Guide', 'Members', ''], rows, 'No teams yet — create the first team.'));
   }
