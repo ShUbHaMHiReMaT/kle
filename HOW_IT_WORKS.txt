@@ -41,13 +41,20 @@ WHO USES IT?  (4 KINDS OF PEOPLE)
      and also at the top of each stage page.
    - Can talk to the AI Mentor, and can use his or her OWN free
      Gemini key (AI Mentor -> "My Gemini key").
-   - AI Mentor "Handbook quiz":
-       1. Press Send -> the AI asks 5 questions from the HANDBOOK
-          for your stage (each question shows the handbook part).
-       2. Type your answers: Q1: ... Q2: ... Q3: ... Q4: ... Q5: ...
-       3. The AI gives each answer 0, 1 or 2 points -> score out of 10
+   - AI Mentor "Timed quiz on my saved work":
+       1. First fill in and SAVE the stage (for example S1).
+       2. Choose the stage and press "Start quiz". The AI reads what
+          YOUR TEAM WROTE and asks 5 questions about it, one by one.
+          (Example: "Your FR2 says 50 mV - why that number?")
+       3. You get 30 SECONDS for each question. When time is up,
+          your answer is sent by itself.
+       4. After EVERY answer the mentor talks back:
+             correct   -> it says why it is right
+             wrong     -> "You answered ... but ..." and then
+                          "The correct way to answer is ..."
+       5. Each answer gets 0, 1 or 2 points -> score out of 10
           (9-10 Exemplary, 7-8 Competent, 4-6 Developing, 0-3 Inadequate).
-       4. Type "next" for new questions.
+       6. Teachers can read every question, answer, time and mark.
      "Score my saved work /10" checks your saved worksheets against
      the handbook. Both are advice only - teachers give the real marks.
    - CANNOT COPY OR PASTE in the worksheets (computer AND mobile). Everything must be typed

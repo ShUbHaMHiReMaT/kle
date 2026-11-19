@@ -36,7 +36,7 @@ var ADMIN_EMAILS = ['shreyashalingali@gmail.com'];
 
 /* Bump this whenever defaultStages_() changes: the live portfolio structure is
  * refreshed automatically on the next request (saved student records are kept). */
-var STRUCTURE_VERSION = '3';
+var STRUCTURE_VERSION = '4';
 
 /* ---------------------------------------------------------------------------
  * THEMES (Handbook Ch. 2, 3, 5.2, 6, 8)

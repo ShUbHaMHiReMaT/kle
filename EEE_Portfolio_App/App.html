@@ -1031,36 +1031,27 @@
   function drawMentor(pane) {
     const T = S.team, u = S.boot.user;
     const canChat = u.role === 'student' || u.role === 'admin';
+    const isStudent = u.role === 'student';
     const stages = stageList();
     const stageSel = select(stages.map(s => ({ v: s.id, l: s.code + ' — ' + s.title })), S.stageId || (stages[0] || {}).id);
-    const modeSel = select([{ v: 'questions', l: 'Handbook quiz — 5 questions, score /10' }, { v: 'review', l: 'Score my saved work /10 (handbook rubric)' }, { v: 'mentor', l: 'Mentoring conversation' }, { v: 'viva', l: 'Mock viva — Five Lenses' }], 'questions');
-    // is there an unanswered quiz (questions asked, not yet scored) for me on this stage?
-    const pendingQuiz = () => {
-      const mine = (S.mentor || []).filter(m => m.role === 'model' && m.mode === 'questions' && m.stageId === stageSel.value && (m.userEmail || '').toLowerCase() === u.email.toLowerCase());
-      const last = mine[mine.length - 1];
-      return !!(last && (last.score === '' || last.score === undefined || last.score === null));
-    };
-    const quizHint = el('div', { class: 'small', style: { padding: '8px 12px', borderTop: '1px solid var(--line)' } });
-    const updateHint = () => {
-      if (modeSel.value !== 'questions') { quizHint.style.display = 'none'; input.placeholder = 'Ask about your design, a concept, or request questions… (Enter to send, Shift+Enter for a new line)'; return; }
-      quizHint.style.display = '';
-      if (pendingQuiz()) { clear(quizHint).appendChild(el('span', null, el('b', null, 'Your turn: '), 'type your answers as Q1: … Q2: … Q3: … Q4: … Q5: … and press Send. The mentor will score you out of 10 against the handbook.')); input.placeholder = 'Q1: …\nQ2: …\nQ3: …\nQ4: …\nQ5: …'; }
-      else { clear(quizHint).appendChild(el('span', null, el('b', null, 'Handbook quiz: '), 'press Send to get 5 questions from the handbook for the selected stage. Answer them in your own words to get a score out of 10.')); input.placeholder = 'Press Send to start the quiz (or type "next" for a new set)'; }
-    };
+    const modeOpts = (isStudent ? [{ v: 'quiz', l: 'Timed quiz on my saved work — 30 s per question, score /10' }] : [])
+      .concat([{ v: 'review', l: 'Score my saved work /10 (handbook rubric)' }, { v: 'mentor', l: 'Mentoring conversation' }, { v: 'viva', l: 'Mock viva — Five Lenses' }]);
+    const modeSel = select(modeOpts, isStudent ? 'quiz' : 'review');
     const filter = u.role !== 'student' ? select([{ v: '', l: 'All stages' }].concat(stages.map(s => ({ v: s.id, l: s.code }))), '') : null;
     const log = el('div', { class: 'chat-log', 'aria-live': 'polite' });
-    const input = el('textarea', { placeholder: 'Ask about your design, a concept, or request questions… (Enter to send, Shift+Enter for a new line)', rows: 2, disabled: !canChat });
+    const input = el('textarea', { placeholder: 'Ask about your design or a concept… (Enter to send, Shift+Enter for a new line)', rows: 2, disabled: !canChat });
     const send = el('button', { class: 'btn primary', disabled: !canChat }, icon('send'), el('span', { class: 'hide-sm' }, 'Send'));
     const usage = el('span', { class: 'tiny muted' });
+    const stageCode = () => (stages.filter(s => s.id === stageSel.value)[0] || {}).code || '';
 
     const msgEl = m => {
       const isUser = m.role === 'user';
       const node = el('div', { class: 'msg ' + (isUser ? 'user' : 'model') },
-        el('div', { class: 'meta' }, (isUser ? m.userName : 'AI Mentor') + ' · ' + (stages.filter(s => s.id === m.stageId)[0] || {}).code + ' · ' + fmt(m.createdAt)),
+        el('div', { class: 'meta' }, (isUser ? m.userName : 'AI Mentor') + ' · ' + ((stages.filter(s => s.id === m.stageId)[0] || {}).code || '') + (m.mode === 'quiz' ? ' · quiz' : '') + ' · ' + fmt(m.createdAt)),
         !isUser && m.score !== '' && m.score !== undefined && m.score !== null ? el('div', null, scoreBadge(m.score)) : null,
         isUser ? el('div', { class: 'b selectable' }, m.text) : el('div', { class: 'b selectable', html: md(m.text) }),
         m.facultyNote ? el('div', { class: 'note' }, '📝 ' + (m.noteBy || 'Faculty') + ': ' + m.facultyNote) : null);
-      if (!isUser && (u.role === 'faculty' || isStaff())) {
+      if (!isUser && m.id && (u.role === 'faculty' || isStaff())) {
         node.appendChild(el('button', { class: 'btn ghost sm', style: { alignSelf: 'flex-start' }, onclick: async () => {
           const n = await promptBox('Faculty note on this mentor reply', 'Note (visible to the team)', { multiline: true, value: m.facultyNote || '' });
           if (n === null) return;
@@ -1074,32 +1065,129 @@
       const items = (S.mentor || []).filter(m => !filter || !filter.value || m.stageId === filter.value);
       if (!items.length) log.appendChild(el('div', { class: 'muted small', style: { textAlign: 'center', margin: 'auto' } },
         el('div', { style: { fontSize: '34px' } }, '🧭'), el('b', null, 'Your team’s AI Mentor'),
-        el('p', null, 'It asks technical and foundational questions using the handbook, your theme, the stage requirements and your saved records. It guides — it will not fill in your worksheets.')));
+        el('p', null, 'Take a timed quiz on what your team wrote, get your saved work scored against the handbook, or ask questions. It guides you — it will not fill in your worksheets.')));
       items.forEach(m => log.appendChild(msgEl(m)));
       log.scrollTop = log.scrollHeight;
     };
+    const pushLog = arr => { (arr || []).forEach(x => S.mentor && S.mentor.push(x)); drawLog(); };
+    const setScore = (stageId, score) => { S.team.aiScores = S.team.aiScores || {}; S.team.aiScores[stageId] = { score: Number(score), at: new Date().toISOString() }; };
+
+    /* ---------- free chat / scoring / viva ---------- */
     const doSend = async () => {
       const text = input.value.trim();
       if (!S.mentor || (!text && modeSel.value === 'mentor')) return;
-      if (modeSel.value === 'questions' && !text && pendingQuiz()) { toast('Type your answers to Q1–Q5 first.', 'bad'); return; }
-      const msg = text || (modeSel.value === 'questions' ? 'Start the handbook quiz.' : modeSel.value === 'review' ? 'Please score our saved records for this stage against the handbook.' : 'Start my mock viva.');
+      const msg = text || (modeSel.value === 'review' ? 'Please score our saved records for this stage against the handbook.' : 'Start my mock viva.');
       input.value = ''; busy(send, true, '…');
-      const pending = { role: 'user', userName: u.name, text: msg, stageId: stageSel.value, createdAt: new Date().toISOString() };
-      S.mentor.push(pending); drawLog();
+      S.mentor.push({ role: 'user', userName: u.name, text: msg, stageId: stageSel.value, createdAt: new Date().toISOString() }); drawLog();
       const typing = el('div', { class: 'msg model' }, el('div', { class: 'b' }, el('span', { class: 'typing' }, el('i'), el('i'), el('i'))));
       log.appendChild(typing); log.scrollTop = log.scrollHeight;
       try {
         const r = await call('mentorChat', { teamId: T.team.id, stageId: stageSel.value, mode: modeSel.value, message: msg });
         S.mentor.pop(); S.mentor.push(r.user, r.reply);
-        if (r.reply.score !== '' && r.reply.score !== undefined) { S.team.aiScores = S.team.aiScores || {}; S.team.aiScores[r.reply.stageId] = { score: Number(r.reply.score), at: r.reply.createdAt }; }
+        if (r.reply.score !== '' && r.reply.score !== undefined) setScore(r.reply.stageId, r.reply.score);
         usage.textContent = r.usedToday + ' / ' + r.limit + ' team messages today';
       } catch (e) { S.mentor.pop(); input.value = msg; toast(e.message, 'bad'); }
-      busy(send, false); drawLog(); updateHint(); input.focus();
+      busy(send, false); drawLog(); input.focus();
     };
     send.onclick = doSend;
     input.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); doSend(); } });
+    const chatIn = el('div', { class: 'chat-in' }, input, send);
+
+    /* ---------- timed interactive quiz ---------- */
+    const quizBox = el('div', { class: 'quiz-box' });
+    let QZ = null, timer = null;
+    const stopTimer = () => { if (timer) { clearInterval(timer); timer = null; } };
+    const quizIdle = () => {
+      stopTimer(); QZ = null;
+      const start = el('button', { class: 'btn primary' }, icon('star'), 'Start quiz on my ' + stageCode() + ' entries');
+      start.onclick = async () => {
+        busy(start, true, 'Preparing questions from your ' + stageCode() + ' entries…');
+        try { const r = await call('quizStart', { teamId: T.team.id, stageId: stageSel.value }); pushLog(r.log); showQuestion(r); }
+        catch (e) { busy(start, false); toast(e.message, 'bad'); }
+      };
+      clear(quizBox).appendChild(el('div', { class: 'stack' },
+        el('div', null, el('b', null, 'Timed quiz on what your team wrote in ' + stageCode()),
+          el('ul', { class: 'small muted', style: { margin: '6px 0 0', paddingLeft: '18px' } },
+            el('li', null, 'The mentor reads your saved ' + stageCode() + ' entries and asks 5 questions about them, one at a time.'),
+            el('li', null, 'You have 30 seconds for each question. When time runs out, your answer is sent automatically.'),
+            el('li', null, 'After every answer the mentor tells you what was right or wrong and shows the correct way to answer.'),
+            el('li', null, 'At the end you get a score out of 10. Typing only — pasting is disabled.'))),
+        el('div', null, start)));
+    };
+    const showQuestion = r => {
+      stopTimer();
+      QZ = { id: r.quizId, index: r.index, total: r.total };
+      const ans = el('textarea', { rows: 3, placeholder: 'Type your answer in your own words… (Enter to submit)' });
+      const bar = el('div', { class: 'qtimer' }, el('i'));
+      const secs = el('span', { class: 'qsecs' }, r.seconds + ' s');
+      const submit = el('button', { class: 'btn primary' }, icon('send'), 'Submit answer');
+      clear(quizBox).appendChild(el('div', { class: 'stack' },
+        el('div', { class: 'row between' }, el('span', { class: 'badge brand' }, 'Question ' + (r.index + 1) + ' of ' + r.total), r.entry ? el('span', { class: 'badge' }, 'About: ' + r.entry) : null, el('span', { style: { flex: 1 } }), secs),
+        bar, el('div', { class: 'quiz-q selectable' }, r.question), ans, el('div', { class: 'row' }, submit, el('span', { class: 'tiny muted' }, 'Answer in 1–2 sentences.'))));
+      const deadline = Date.now() + r.seconds * 1000, full = 30;
+      let sent = false;
+      const fire = auto => { if (sent) return; sent = true; stopTimer(); answer(ans.value.trim(), auto, submit, ans); };
+      timer = setInterval(() => {
+        if (!document.body.contains(quizBox)) { stopTimer(); return; }
+        const left = Math.max(0, (deadline - Date.now()) / 1000);
+        bar.firstChild.style.width = (left / full * 100) + '%';
+        bar.classList.toggle('low', left <= 10);
+        secs.textContent = Math.ceil(left) + ' s';
+        if (left <= 0) fire(true);
+      }, 200);
+      submit.onclick = () => fire(false);
+      ans.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); fire(false); } });
+      setTimeout(() => ans.focus(), 50);
+    };
+    const answer = async (text, auto, submitBtn, ans) => {
+      ans.disabled = true; busy(submitBtn, true, auto ? 'Time up — sending…' : 'Checking…');
+      quizBox.appendChild(el('div', { class: 'small muted row' }, el('span', { class: 'typing' }, el('i'), el('i'), el('i')), ' The mentor is checking your answer…'));
+      try {
+        const r = await call('quizAnswer', { quizId: QZ.id, index: QZ.index, answer: text });
+        pushLog(r.log); showFeedback(r);
+      } catch (e) {
+        toast(e.message, 'bad');
+        const retry = el('button', { class: 'btn' }, icon('refresh'), 'Try again');
+        retry.onclick = () => { retry.remove(); answer(text, auto, submitBtn, ans); };   // server keeps the original answer & time
+        quizBox.appendChild(el('div', { style: { marginTop: '8px' } }, retry));
+      }
+    };
+    const showFeedback = r => {
+      const cls = r.mark === 2 ? 'ok' : r.mark === 1 ? 'warn' : 'bad';
+      const body = el('div', { class: 'stack' },
+        el('div', { class: 'row' }, el('span', { class: 'badge ' + cls }, (r.mark === 2 ? '✅ ' : r.mark === 1 ? '🟡 ' : '❌ ') + r.mark + '/2 — ' + r.verdict), el('span', { class: 'tiny muted' }, r.late ? 'Time ran out' : 'Answered in ' + r.seconds + ' s')),
+        r.feedback ? el('div', { class: 'selectable' }, r.feedback) : null,
+        r.correct ? el('div', { class: 'alert ok', style: { display: 'block' } }, el('b', null, 'The correct way to answer: '), r.correct) : null);
+      if (r.done) {
+        setScore(stageSel.value, r.score);
+        const again = el('button', { class: 'btn primary', onclick: quizIdle }, icon('refresh'), 'Start a new quiz');
+        body.appendChild(el('div', { class: 'info-box' },
+          el('div', { class: 'row' }, el('b', null, 'Quiz finished'), scoreBadge(r.score)),
+          el('div', { class: 'small', style: { marginTop: '6px' } }, (r.results || []).map((x, k) => el('div', null, 'Q' + (k + 1) + ' — ' + x.mark + '/2 ' + (x.mark === 2 ? '✅' : x.mark === 1 ? '🟡' : '❌') + (x.late ? ' (time up)' : ' (' + x.seconds + ' s)')))),
+          el('div', { style: { marginTop: '10px' } }, again)));
+        QZ = null;
+      } else {
+        const next = el('button', { class: 'btn primary' }, 'Next question (' + (r.index + 2) + ' of ' + r.total + ') →');
+        next.onclick = async () => {
+          busy(next, true, 'Loading…');
+          try { const q = await call('quizNext', { quizId: QZ.id }); pushLog(q.log); showQuestion(q); }
+          catch (e) { busy(next, false); toast(e.message, 'bad'); }
+        };
+        body.appendChild(el('div', null, next, el('span', { class: 'tiny muted', style: { marginLeft: '10px' } }, 'The 30 seconds start when you open the next question.')));
+      }
+      clear(quizBox).appendChild(body);
+    };
+
+    const applyMode = () => {
+      const quiz = modeSel.value === 'quiz';
+      chatIn.style.display = quiz ? 'none' : '';
+      quizBox.style.display = quiz ? '' : 'none';
+      if (quiz && !QZ) quizIdle();
+      if (!quiz) stopTimer();
+    };
+    modeSel.addEventListener('change', applyMode);
+    stageSel.addEventListener('change', () => { if (modeSel.value === 'quiz' && !QZ) quizIdle(); });
     if (filter) filter.onchange = drawLog;
-    modeSel.addEventListener('change', updateHint); stageSel.addEventListener('change', updateHint);
 
     pane.appendChild(el('div', { class: 'card' },
       el('div', { class: 'card-h' }, el('div', { class: 'row', style: { flex: 1 } }, el('span', { class: 'ic avatar' }, icon('bot')), el('div', null, el('h3', null, 'AI Mentor'), el('div', { class: 'tiny muted' }, 'Gemini · team-wise history · reviewed by faculty'))),
@@ -1107,11 +1195,12 @@
         filter ? el('div', { style: { minWidth: '160px' } }, filter) : null),
       u.role === 'student' ? myKeyPanel() : null,
       !S.boot.settings.mentorEnabled ? el('div', { class: 'card-b' }, el('div', { class: 'alert warn' }, icon('alert'), u.role === 'student' ? 'The AI Mentor needs a Gemini key. Add your own key above (free from Google AI Studio), or ask the administrator.' : 'The AI Mentor is not configured yet. The administrator must set the Gemini API key.')) : null,
-      el('div', { class: 'chat' }, log, canChat ? quizHint : null, canChat ? el('div', { class: 'chat-in' }, input, send) : el('div', { class: 'chat-in small muted' }, 'Read-only review of the team’s AI Mentor interactions. Add notes on replies to guide the team.')),
+      el('div', { class: 'chat' }, log, canChat ? quizBox : null, canChat ? chatIn : el('div', { class: 'chat-in small muted' }, 'Read-only review of the team’s AI Mentor interactions, including every quiz question, answer, time taken and mark. Add notes on replies to guide the team.')),
       canChat ? el('div', { class: 'card-b', style: { paddingTop: '6px', paddingBottom: '10px' } }, usage) : null));
+    if (canChat) applyMode();
 
-    if (S.mentor && S.mentor._team === T.team.id) { drawLog(); updateHint(); }
-    else { log.appendChild(loader('Loading conversation…')); call('mentorHistory', { teamId: T.team.id }).then(h => { S.mentor = h; S.mentor._team = T.team.id; drawLog(); updateHint(); }).catch(e => { clear(log).appendChild(el('div', { class: 'alert bad' }, e.message)); }); }
+    if (S.mentor && S.mentor._team === T.team.id) drawLog();
+    else { log.appendChild(loader('Loading conversation…')); call('mentorHistory', { teamId: T.team.id }).then(h => { S.mentor = h; S.mentor._team = T.team.id; drawLog(); }).catch(e => { clear(log).appendChild(el('div', { class: 'alert bad' }, e.message)); }); }
   }
 
   function myKeyPanel() {

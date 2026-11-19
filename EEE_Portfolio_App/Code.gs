@@ -30,7 +30,8 @@ const SCHEMA = {
   Comments:  ['id', 'teamId', 'stageId', 'sectionId', 'authorEmail', 'authorName', 'role', 'text', 'createdAt'],
   Reviews:   ['id', 'teamId', 'reviewId', 'facultyEmail', 'facultyName', 'gateJson', 'bandsJson', 'lensNotes', 'marks', 'decision', 'comment', 'extraJson', 'createdAt', 'updatedAt'],
   MentorLog: ['id', 'teamId', 'stageId', 'mode', 'userEmail', 'userName', 'role', 'text', 'model', 'createdAt', 'facultyNote', 'noteBy', 'score'],
-  Audit:     ['at', 'email', 'role', 'action', 'teamId', 'detail']
+  Audit:     ['at', 'email', 'role', 'action', 'teamId', 'detail'],
+  Quizzes:   ['id', 'teamId', 'stageId', 'userEmail', 'userName', 'questionsJson', 'resultsJson', 'current', 'askedAt', 'pendingJson', 'status', 'score', 'model', 'createdAt', 'finishedAt']
 };
 
 const DEFAULT_SETTINGS = {
@@ -379,6 +380,9 @@ const ACTIONS = {
   saveReview:   { roles: ['admin', 'coordinator', 'faculty'], write: true, fn: (c, a) => saveReview_(c, a) },
   mentorChat:   { roles: ['admin', 'student'], write: true, fn: (c, a) => mentorChat_(c, a) },
   mentorHistory:{ roles: ['admin', 'coordinator', 'faculty', 'student'], fn: (c, a) => mentorHistory_(c, a) },
+  quizStart:    { roles: ['student'], write: true, fn: (c, a) => quizStart_(c, a) },
+  quizAnswer:   { roles: ['student'], write: true, fn: (c, a) => quizAnswer_(c, a) },
+  quizNext:     { roles: ['student'], write: true, fn: (c, a) => quizNext_(c, a) },
   mentorNote:   { roles: ['admin', 'coordinator', 'faculty'], write: true, fn: (c, a) => mentorNote_(c, a) },
   // student's own Gemini key (stored server-side only)
   myKeyStatus:  { roles: ['student'], fn: (c, a) => myKeyStatus_(c) },
@@ -947,7 +951,7 @@ function assignKeys_(ctx, a) {
 /* ============================================================================
  * AI MENTOR (Gemini)
  * ========================================================================== */
-function callGemini_(key, model, system, contents, temperature, maxTokens) {
+function callGemini_(key, model, system, contents, temperature, maxTokens, json) {
   if (!/^[A-Za-z0-9.\-_]+$/.test(model)) throw new Error('Invalid model name.');
   const url = 'https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(model) + ':generateContent';
   const payload = {
@@ -955,6 +959,7 @@ function callGemini_(key, model, system, contents, temperature, maxTokens) {
     contents: contents,
     generationConfig: { temperature: temperature, maxOutputTokens: maxTokens || 2048 }
   };
+  if (json) payload.generationConfig.responseMimeType = 'application/json';
   const res = UrlFetchApp.fetch(url, { method: 'post', contentType: 'application/json', headers: { 'x-goog-api-key': key }, payload: JSON.stringify(payload), muteHttpExceptions: true });
   const code = res.getResponseCode();
   const body = safeJson_(res.getContentText(), {});
@@ -1399,4 +1404,182 @@ function deleteMyKey_(ctx) {
   PROP.deleteProperty('GEMINI_STUKEY_' + ctx.studentId);
   audit_(ctx, 'deleteMyKey', ctx.teamId, '');
   return { hasKey: false };
+}
+
+
+/* ============================================================================
+ * TIMED INTERACTIVE QUIZ — questions about the student's own saved work,
+ * 30 s per question (checked on the server), mentor feedback after every
+ * answer ("You answered … but … The correct way is …"), total score /10.
+ * ========================================================================== */
+const QUIZ = { questions: 5, seconds: 30, grace: 8 };
+
+/** Key, model and daily-limit check shared by mentor features. */
+function mentorAccess_(ctx, team) {
+  const s = settings_();
+  const own = ctx.role === 'student' ? studentKey_(ctx) : null;
+  const rk = own ? { id: 'student', key: own.key } : resolveTeamKey_(team);
+  if (!rk) throw new Error('AI Mentor is not configured yet. Add your own Gemini API key (AI Mentor → "My Gemini key"), or ask the administrator.');
+  const meta = keysMeta_().filter(k => k.id === rk.id)[0];
+  const model = (own && own.model) || team.model || (meta && meta.model) || s.defaultModel;
+  const today = now_().slice(0, 10);
+  const used = where_('MentorLog', 'teamId', team.id).filter(m => m.role === 'user' && String(m.createdAt).slice(0, 10) === today).length;
+  if (ctx.role !== 'admin' && !own && used >= Number(s.mentorDailyLimit || 40)) throw new Error('Your team has reached today\'s AI Mentor limit (' + s.mentorDailyLimit + ' messages). Try again tomorrow, or add your own Gemini key.');
+  return { key: rk.key, model: model, used: used, limit: s.mentorDailyLimit };
+}
+
+/** The team's saved entries for ONE stage (team sections + this student's individual sections). */
+function stageRecordsText_(team, stage, ctx) {
+  const recs = where_('Records', 'teamId', team.id);
+  const parts = [];
+  (stage.sections || []).forEach(sec => {
+    if (sec.type === 'info' || sec.type === 'evidence') return;
+    const r = recs.filter(x => x.sectionId === sec.id && (!x.owner || x.owner === ctx.email))[0];
+    const d = recordData_(r);
+    if (!d) return;
+    let txt = '';
+    if (sec.type === 'table') {
+      txt = (d.rows || []).filter(row => (sec.columns || []).slice(1).some(c => String(row[c.id] || '').trim()))
+        .map(row => (sec.columns || []).map(c => row[c.id] ? c.label + ': ' + row[c.id] : '').filter(String).join(' | ')).join('\n');
+    } else {
+      txt = (sec.fields || []).filter(f => (d.values || {})[f.id]).map(f => f.label.slice(0, 90) + ': ' + d.values[f.id]).join('\n');
+    }
+    if (txt.trim()) parts.push('[' + sec.title + ']\n' + txt);
+  });
+  return parts.join('\n\n').slice(0, 12000);
+}
+
+function parseJson_(t) {
+  const s = String(t || '').replace(/```(?:json)?/gi, '');
+  const i = s.indexOf('{'), j = s.lastIndexOf('}');
+  if (i < 0 || j < i) throw new Error('The AI Mentor returned an unexpected answer. Please try again.');
+  try { return JSON.parse(s.slice(i, j + 1)); } catch (e) { throw new Error('The AI Mentor returned an unexpected answer. Please try again.'); }
+}
+
+function logMentor_(ctx, teamId, stageId, role, text, model, score, offsetMs) {
+  const e = { id: uid_(role === 'user' ? 'mu' : 'mr'), teamId: teamId, stageId: stageId, mode: 'quiz', userEmail: ctx.email,
+    userName: role === 'user' ? ctx.name : 'AI Mentor', role: role, text: text, model: model,
+    createdAt: new Date(Date.now() + (offsetMs || 0)).toISOString(), facultyNote: '', noteBy: '', score: score === undefined ? '' : score };
+  insert_('MentorLog', e);
+  return e;
+}
+
+function quizStart_(ctx, a) {
+  const team = teamAccess_(ctx, a.teamId, 'write');
+  const stage = stageById_(a.stageId);
+  if (!stage) throw new Error('Choose a stage.');
+  const work = stageRecordsText_(team, stage, ctx);
+  if (!work) throw new Error('Your team has not saved anything in ' + stage.code + ' yet. Fill in and save ' + stage.code + ' first — the quiz asks questions about what you wrote there.');
+  const m = mentorAccess_(ctx, team);
+  const theme = themeById_(team.themeId);
+  const sys = [
+    'You are the AI Mentor for the ' + DEPARTMENT.course + ', ' + DEPARTMENT.name + ', ' + DEPARTMENT.institution + '.',
+    'Write a short oral-style quiz for ONE student about THEIR TEAM\'S OWN SAVED WORK for stage ' + stage.code + ' (' + stage.title + ') shown in the user message.',
+    'Write exactly ' + QUIZ.questions + ' questions. EVERY question must be about a specific entry they wrote — name or quote it (e.g. "Your FR2 says ±1 % — which instrument will you use to measure it, and why?").',
+    'Ask them to justify or explain their own entries: why that number/target, its unit, how it will be measured, where the source comes from, how two of their entries are consistent, or what would change if a value changed.',
+    'Do NOT ask general textbook or handbook questions that are not tied to their entries. Each question must be answerable in about 30 seconds (one or two sentences) and be under 35 words. Do not include answers or hints.',
+    'Return ONLY JSON: {"questions":[{"q":"question text","entry":"short name of the entry it is about"}]}',
+    '',
+    'Reference — the department handbook requirements for this stage (use it only to choose meaningful questions):',
+    handbookStageText_(stage, theme)
+  ].join('\n');
+  const out = callGemini_(m.key, m.model, sys, [{ role: 'user', parts: [{ text: 'TEAM SAVED WORK — ' + stage.code + ' ' + stage.title + ':\n' + work }] }], 0.7, 8192, true);
+  const qs = ((parseJson_(out).questions) || []).map(x => typeof x === 'string' ? { q: clean_(x, 400), entry: '' } : { q: clean_(x.q, 400), entry: clean_(x.entry, 120) })
+    .filter(x => x.q).slice(0, QUIZ.questions);
+  if (qs.length < 3) throw new Error('The AI Mentor could not prepare questions from your entries. Please try again.');
+  // Only one running quiz per student
+  where_('Quizzes', 'userEmail', ctx.email).filter(q => q.status === 'running').forEach(q => update_('Quizzes', q._row, { status: 'abandoned' }));
+  const id = uid_('qz'), t = now_();
+  insert_('Quizzes', { id: id, teamId: team.id, stageId: stage.id, userEmail: ctx.email, userName: ctx.name, questionsJson: JSON.stringify(qs),
+    resultsJson: '[]', current: 0, askedAt: t, pendingJson: '', status: 'running', score: '', model: m.model, createdAt: t, finishedAt: '' });
+  const log = [
+    logMentor_(ctx, team.id, stage.id, 'user', 'Started a timed quiz on ' + stage.code + ' (' + qs.length + ' questions × ' + QUIZ.seconds + ' s).', m.model, '', 0),
+    logMentor_(ctx, team.id, stage.id, 'model', '**Question 1 of ' + qs.length + '** (' + QUIZ.seconds + ' s)' + (qs[0].entry ? ' — about *' + qs[0].entry + '*' : '') + '\n' + qs[0].q, m.model, '', 1)
+  ];
+  audit_(ctx, 'quizStart', team.id, stage.code);
+  return { quizId: id, index: 0, total: qs.length, question: qs[0].q, entry: qs[0].entry, seconds: QUIZ.seconds, log: log };
+}
+
+function quizAnswer_(ctx, a) {
+  const q = one_('Quizzes', 'id', a.quizId);
+  if (!q || q.userEmail !== ctx.email) throw new Error('Quiz not found.');
+  const team = teamAccess_(ctx, q.teamId, 'write');
+  if (q.status !== 'running') throw new Error('This quiz has already ended. Start a new one.');
+  const i = Number(q.current || 0);
+  if (Number(a.index) !== i) throw new Error('This question was already answered.');
+  const qs = safeJson_(q.questionsJson, []);
+  const results = safeJson_(q.resultsJson, []);
+  const log = [];
+  // Freeze the answer and its timing BEFORE calling the AI, so a network/AI retry is never counted as late.
+  let pend = safeJson_(q.pendingJson, null);
+  if (!pend || pend.index !== i) {
+    if (!q.askedAt) throw new Error('Open the next question first.');
+    const secs = Math.max(0, Math.round((Date.now() - new Date(q.askedAt).getTime()) / 1000));
+    const late = secs > QUIZ.seconds + QUIZ.grace;
+    pend = { index: i, answer: late ? '' : clean_(a.answer, 1500), seconds: secs, late: late };
+    update_('Quizzes', q._row, { pendingJson: JSON.stringify(pend) });
+    log.push(logMentor_(ctx, team.id, q.stageId, 'user', pend.answer ? 'A' + (i + 1) + ': ' + pend.answer : (late ? '(time up — no answer counted)' : '(no answer)'), q.model, '', 0));
+  }
+  const stage = stageById_(q.stageId), theme = themeById_(team.themeId);
+  const m = mentorAccess_(ctx, team);
+  const sys = [
+    'You are the AI Mentor marking ONE quiz answer. Talk directly to the student ("you") in a friendly, encouraging mentor voice.',
+    'Mark the answer 0, 1 or 2: 2 = correct, specific and consistent with their saved entry and sound engineering; 1 = partly correct, incomplete or vague; 0 = wrong, blank, off-topic or time ran out.',
+    'Then respond like a mentor:',
+    '- If 2: confirm briefly why the answer is right (1–2 sentences).',
+    '- If 0 or 1: say what was wrong or missing, starting with "You answered … but …" (or "You did not answer in time." if blank), then explain THE CORRECT WAY TO ANSWER — the right reasoning, principle, equation, unit or measurement method — in 2–4 sentences.',
+    'Keep feedback under 90 words in total. Judge using their saved work and the handbook reference below; do not invent requirements.',
+    'Return ONLY JSON: {"mark":0,"verdict":"correct|partly correct|incorrect","feedback":"what was right/wrong in their answer","correct_way":"the correct way to answer (empty if mark is 2)"}',
+    '',
+    'Handbook reference for this stage:',
+    handbookStageText_(stage, theme),
+    '',
+    'TEAM SAVED WORK — ' + stage.code + ':',
+    stageRecordsText_(team, stage, ctx)
+  ].join('\n');
+  const userMsg = 'QUESTION: ' + qs[i].q + (qs[i].entry ? '\n(About their entry: ' + qs[i].entry + ')' : '') + '\nSTUDENT ANSWER: ' + (pend.answer || '(no answer — time ran out)');
+  const res = parseJson_(callGemini_(m.key, m.model, sys, [{ role: 'user', parts: [{ text: userMsg }] }], 0.3, 8192, true));
+  let mark = Math.round(Number(res.mark));
+  if (isNaN(mark)) mark = 0;
+  mark = Math.max(0, Math.min(2, mark));
+  if (!pend.answer) mark = 0;
+  const verdict = mark === 2 ? 'correct' : mark === 1 ? 'partly correct' : 'incorrect';
+  const feedback = clean_(res.feedback, 1200), correct = mark === 2 ? '' : clean_(res.correct_way, 1200);
+  results.push({ q: qs[i].q, entry: qs[i].entry, answer: pend.answer, seconds: pend.seconds, late: pend.late, mark: mark, verdict: verdict, feedback: feedback, correct: correct });
+  const icon = mark === 2 ? '✅' : mark === 1 ? '🟡' : '❌';
+  log.push(logMentor_(ctx, team.id, q.stageId, 'model', icon + ' **' + mark + '/2 — ' + verdict + '**' + (pend.late ? ' *(time up)*' : ' *(answered in ' + pend.seconds + ' s)*') + '\n' + feedback + (correct ? '\n\n**The correct way to answer:** ' + correct : ''), m.model, '', 1));
+
+  const done = i + 1 >= qs.length;
+  const upd = { resultsJson: JSON.stringify(results), current: i + 1, askedAt: '', pendingJson: '' };
+  const out = { index: i, mark: mark, verdict: verdict, feedback: feedback, correct: correct, late: pend.late, seconds: pend.seconds, done: done, total: qs.length, log: log };
+  if (done) {
+    const sum = results.reduce((n, r) => n + r.mark, 0);
+    const score = Math.round((sum / (2 * results.length)) * 10 * 2) / 2;   // out of 10
+    const band = score >= 9 ? 'Exemplary' : score >= 7 ? 'Competent' : score >= 4 ? 'Developing' : 'Inadequate';
+    const summary = '**Quiz score: ' + score + '/10** — ' + band + ' (' + stage.code + ')\n' +
+      results.map((r, k) => '- Q' + (k + 1) + ' — ' + r.mark + '/2 ' + (r.mark === 2 ? '✅' : r.mark === 1 ? '🟡' : '❌') + (r.late ? ' (time up)' : ' (' + r.seconds + ' s)')).join('\n') +
+      '\n\nRead the feedback above, improve your ' + stage.code + ' entries, and try again with a new quiz.';
+    log.push(logMentor_(ctx, team.id, q.stageId, 'model', summary, m.model, String(score), 2));
+    upd.status = 'done'; upd.score = String(score); upd.finishedAt = now_();
+    out.score = score; out.band = band; out.results = results;
+    audit_(ctx, 'quizDone', team.id, stage.code + ' ' + score + '/10');
+  }
+  update_('Quizzes', q._row, upd);
+  return out;
+}
+
+function quizNext_(ctx, a) {
+  const q = one_('Quizzes', 'id', a.quizId);
+  if (!q || q.userEmail !== ctx.email) throw new Error('Quiz not found.');
+  const team = teamAccess_(ctx, q.teamId, 'write');
+  if (q.status !== 'running') throw new Error('This quiz has already ended.');
+  const qs = safeJson_(q.questionsJson, []);
+  const i = Number(q.current || 0);
+  if (i >= qs.length) throw new Error('No more questions.');
+  if (q.askedAt) {   // already open (e.g. page refresh): keep the original start time
+    return { quizId: q.id, index: i, total: qs.length, question: qs[i].q, entry: qs[i].entry, seconds: Math.max(0, QUIZ.seconds - Math.round((Date.now() - new Date(q.askedAt).getTime()) / 1000)), log: [] };
+  }
+  update_('Quizzes', q._row, { askedAt: now_() });
+  const log = [logMentor_(ctx, team.id, q.stageId, 'model', '**Question ' + (i + 1) + ' of ' + qs.length + '** (' + QUIZ.seconds + ' s)' + (qs[i].entry ? ' — about *' + qs[i].entry + '*' : '') + '\n' + qs[i].q, q.model, '', 0)];
+  return { quizId: q.id, index: i, total: qs.length, question: qs[i].q, entry: qs[i].entry, seconds: QUIZ.seconds, log: log };
 }
