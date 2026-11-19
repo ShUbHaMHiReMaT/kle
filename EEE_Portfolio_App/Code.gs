@@ -66,6 +66,12 @@ function setup() {
  * ========================================================================== */
 function ensureSetup_() {
   if (!PROP.getProperty('SPREADSHEET_ID') || !PROP.getProperty('ROOT_FOLDER_ID')) initialize_();
+  // Portfolio structure is fixed by the handbook (no UI editor). When the code's structure
+  // version changes, refresh the stage definitions. Saved records are keyed by section id and kept.
+  if (PROP.getProperty('STRUCTURE_VERSION') !== STRUCTURE_VERSION) {
+    PROP.setProperty('STRUCTURE_VERSION', STRUCTURE_VERSION);   // set first: prevents re-entry
+    try { syncHandbookStages_(true); } catch (e) { PROP.deleteProperty('STRUCTURE_VERSION'); throw e; }
+  }
 }
 
 function initialize_() {
@@ -277,13 +283,16 @@ function resolveRole_(email, via) {
   const ctx = { email: email, via: via, role: '', name: '', facultyId: '', studentId: '', teamId: '' };
   const fac = where_('Faculty', 'email', email).filter(f => bool_(f.active))[0];
   const fixedAdmin = (typeof ADMIN_EMAILS !== 'undefined' ? ADMIN_EMAILS : []).map(e => String(e).toLowerCase()).indexOf(email) >= 0;
-  if (email === ownerEmail_() || fixedAdmin) { ctx.role = 'admin'; ctx.name = fac ? fac.name : 'Portfolio Administrator'; ctx.facultyId = fac ? fac.id : ''; return ctx; }
+  if (email === ownerEmail_() || fixedAdmin) { ctx.role = 'admin'; ctx.roleLabel = 'HoD / Admin'; ctx.name = fac ? fac.name : 'Portfolio Administrator'; ctx.facultyId = fac ? fac.id : ''; return ctx; }
   if (fac) {
-    ctx.role = String(fac.role) === 'HoD/Admin' ? 'admin' : 'faculty';
+    const r = String(fac.role);
+    // Coordinator and Reviewer: Administration (people, teams, reminders, audit) + every team portfolio + reviews.
+    ctx.role = r === 'HoD/Admin' ? 'admin' : (r === 'Coordinator' || r === 'Reviewer') ? 'coordinator' : 'faculty';
+    ctx.roleLabel = r === 'HoD/Admin' ? 'HoD / Admin' : r === 'Coordinator' ? 'Coordinator' : r === 'Reviewer' ? 'Reviewer' : 'Faculty Guide';
     ctx.name = fac.name; ctx.facultyId = fac.id; return ctx;
   }
   const st = where_('Students', 'email', email).filter(s => bool_(s.active))[0];
-  if (st) { ctx.role = 'student'; ctx.name = st.name; ctx.studentId = st.id; ctx.teamId = st.teamId; return ctx; }
+  if (st) { ctx.role = 'student'; ctx.roleLabel = 'Student'; ctx.name = st.name; ctx.studentId = st.id; ctx.teamId = st.teamId; return ctx; }
   return ctx; // authenticated but not rostered
 }
 
@@ -292,6 +301,10 @@ function teamAccess_(ctx, teamId, mode) {
   const team = one_('Teams', 'id', teamId);
   if (!team) throw new Error('Team not found.');
   if (ctx.role === 'admin') return team;
+  if (ctx.role === 'coordinator') {
+    if (mode === 'write') throw new Error('Coordinators and reviewers review records but do not edit student records.');
+    return team;
+  }
   if (ctx.role === 'faculty') {
     const ids = [team.guideId, team.coGuideId].concat(String(team.reviewerIds || '').split(',')).map(s => String(s).trim());
     if (ids.indexOf(ctx.facultyId) < 0) throw new Error('You are not assigned to this team.');
@@ -351,33 +364,37 @@ const ACTIONS = {
   bootstrap:    { pub: true, write: false, fn: (c, a) => bootstrap_(c) },
   logout:       { pub: true, write: false, fn: (c, a) => { if (a.token) CacheService.getScriptCache().remove('tok_' + a.token); return true; } },
   // any rostered role
-  teamList:     { roles: ['admin', 'faculty', 'student'], fn: (c) => teamSummaries_(c) },
-  getTeam:      { roles: ['admin', 'faculty', 'student'], fn: (c, a) => getTeam_(c, a.teamId) },
+  teamList:     { roles: ['admin', 'coordinator', 'faculty', 'student'], fn: (c) => teamSummaries_(c) },
+  getTeam:      { roles: ['admin', 'coordinator', 'faculty', 'student'], fn: (c, a) => getTeam_(c, a.teamId) },
   saveRecord:   { roles: ['admin', 'student'], write: true, fn: (c, a) => saveRecord_(c, a) },
   signSection:  { roles: ['student', 'admin'], write: true, fn: (c, a) => signSection_(c, a) },
-  unlockSection:{ roles: ['admin', 'faculty'], write: true, fn: (c, a) => unlockSection_(c, a) },
-  addComment:   { roles: ['admin', 'faculty', 'student'], write: true, fn: (c, a) => addComment_(c, a) },
+  unlockSection:{ roles: ['admin', 'coordinator', 'faculty'], write: true, fn: (c, a) => unlockSection_(c, a) },
+  addComment:   { roles: ['admin', 'coordinator', 'faculty', 'student'], write: true, fn: (c, a) => addComment_(c, a) },
   uploadEvidence:{ roles: ['admin', 'student'], write: true, fn: (c, a) => uploadEvidence_(c, a) },
   addLinkEvidence:{ roles: ['admin', 'student'], write: true, fn: (c, a) => addLinkEvidence_(c, a) },
   deleteEvidence:{ roles: ['admin', 'student'], write: true, fn: (c, a) => deleteEvidence_(c, a) },
-  saveReview:   { roles: ['admin', 'faculty'], write: true, fn: (c, a) => saveReview_(c, a) },
+  saveReview:   { roles: ['admin', 'coordinator', 'faculty'], write: true, fn: (c, a) => saveReview_(c, a) },
   mentorChat:   { roles: ['admin', 'student'], write: true, fn: (c, a) => mentorChat_(c, a) },
-  mentorHistory:{ roles: ['admin', 'faculty', 'student'], fn: (c, a) => mentorHistory_(c, a) },
-  mentorNote:   { roles: ['admin', 'faculty'], write: true, fn: (c, a) => mentorNote_(c, a) },
-  // admin
-  adminData:    { roles: ['admin'], fn: (c) => adminData_() },
-  saveFaculty:  { roles: ['admin'], write: true, fn: (c, a) => saveFaculty_(c, a) },
-  deleteFaculty:{ roles: ['admin'], write: true, fn: (c, a) => deleteFaculty_(c, a) },
-  bulkFaculty:  { roles: ['admin'], write: true, fn: (c, a) => bulkFaculty_(c, a) },
-  saveStudent:  { roles: ['admin'], write: true, fn: (c, a) => saveStudent_(c, a) },
-  deleteStudent:{ roles: ['admin'], write: true, fn: (c, a) => deleteStudent_(c, a) },
-  bulkStudents: { roles: ['admin'], write: true, fn: (c, a) => bulkStudents_(c, a) },
-  importRoster: { roles: ['admin'], write: true, fn: (c, a) => importRoster_(c) },
-  sendReminder: { roles: ['admin'], write: true, fn: (c, a) => sendReminder_(c, a) },
-  mailQuota:    { roles: ['admin'], fn: (c, a) => ({ remaining: MailApp.getRemainingDailyQuota() }) },
-  saveTeam:     { roles: ['admin'], write: true, fn: (c, a) => saveTeam_(c, a) },
-  archiveTeam:  { roles: ['admin'], write: true, fn: (c, a) => archiveTeam_(c, a) },
-  setTeamMembers:{ roles: ['admin'], write: true, fn: (c, a) => setTeamMembers_(c, a) },
+  mentorHistory:{ roles: ['admin', 'coordinator', 'faculty', 'student'], fn: (c, a) => mentorHistory_(c, a) },
+  mentorNote:   { roles: ['admin', 'coordinator', 'faculty'], write: true, fn: (c, a) => mentorNote_(c, a) },
+  // student's own Gemini key (stored server-side only)
+  myKeyStatus:  { roles: ['student'], fn: (c, a) => myKeyStatus_(c) },
+  saveMyKey:    { roles: ['student'], write: true, fn: (c, a) => saveMyKey_(c, a) },
+  deleteMyKey:  { roles: ['student'], write: true, fn: (c, a) => deleteMyKey_(c) },
+  // admin / coordinator
+  adminData:    { roles: ['admin', 'coordinator'], fn: (c) => adminData_(c) },
+  saveFaculty:  { roles: ['admin', 'coordinator'], write: true, fn: (c, a) => saveFaculty_(c, a) },
+  deleteFaculty:{ roles: ['admin', 'coordinator'], write: true, fn: (c, a) => deleteFaculty_(c, a) },
+  bulkFaculty:  { roles: ['admin', 'coordinator'], write: true, fn: (c, a) => bulkFaculty_(c, a) },
+  saveStudent:  { roles: ['admin', 'coordinator'], write: true, fn: (c, a) => saveStudent_(c, a) },
+  deleteStudent:{ roles: ['admin', 'coordinator'], write: true, fn: (c, a) => deleteStudent_(c, a) },
+  bulkStudents: { roles: ['admin', 'coordinator'], write: true, fn: (c, a) => bulkStudents_(c, a) },
+  importRoster: { roles: ['admin', 'coordinator'], write: true, fn: (c, a) => importRoster_(c) },
+  sendReminder: { roles: ['admin', 'coordinator'], write: true, fn: (c, a) => sendReminder_(c, a) },
+  mailQuota:    { roles: ['admin', 'coordinator'], fn: (c, a) => ({ remaining: MailApp.getRemainingDailyQuota() }) },
+  saveTeam:     { roles: ['admin', 'coordinator'], write: true, fn: (c, a) => saveTeam_(c, a) },
+  archiveTeam:  { roles: ['admin', 'coordinator'], write: true, fn: (c, a) => archiveTeam_(c, a) },
+  setTeamMembers:{ roles: ['admin', 'coordinator'], write: true, fn: (c, a) => setTeamMembers_(c, a) },
   addKey:       { roles: ['admin'], write: true, fn: (c, a) => addKey_(c, a) },
   updateKey:    { roles: ['admin'], write: true, fn: (c, a) => updateKey_(c, a) },
   deleteKey:    { roles: ['admin'], write: true, fn: (c, a) => deleteKey_(c, a) },
@@ -385,7 +402,7 @@ const ACTIONS = {
   listModels:   { roles: ['admin'], fn: (c, a) => listModels_(c, a) },
   assignKeys:   { roles: ['admin'], write: true, fn: (c, a) => assignKeys_(c, a) },
   saveSettings: { roles: ['admin'], write: true, fn: (c, a) => saveSettings_(c, a) },
-  auditLog:     { roles: ['admin'], fn: (c, a) => all_('Audit').slice(-300).reverse() }
+  auditLog:     { roles: ['admin', 'coordinator'], fn: (c, a) => all_('Audit').slice(-300).reverse() }
 };
 
 /** Single public RPC entry: google.script.run.api({token, action, args}) */
@@ -425,11 +442,11 @@ function bootstrap_(ctx) {
   if (!ctx.role) return Object.assign(base, { notRostered: true, email: ctx.email });
   const s = settings_();
   return Object.assign(base, {
-    user: { email: ctx.email, name: ctx.name, role: ctx.role, teamId: ctx.teamId, via: ctx.via, facultyId: ctx.facultyId },
+    user: { email: ctx.email, name: ctx.name, role: ctx.role, roleLabel: ctx.roleLabel || '', teamId: ctx.teamId, via: ctx.via, facultyId: ctx.facultyId },
     themes: THEMES, rubric: RUBRIC, bands: BANDS, reviews: REVIEWS, extraMarks: EXTRA_MARKS, lenses: LENSES,
     principles: HANDBOOK_PRINCIPLES,
     stages: stages_(ctx.role === 'admin'),
-    settings: { enforceGates: s.enforceGates, showMarksToStudents: s.showMarksToStudents, mentorDailyLimit: s.mentorDailyLimit, mentorEnabled: keysMeta_().length > 0 }
+    settings: { enforceGates: s.enforceGates, showMarksToStudents: s.showMarksToStudents, mentorDailyLimit: s.mentorDailyLimit, mentorEnabled: keysMeta_().length > 0 || (ctx.role === 'student' && !!studentKey_(ctx)) }
   });
 }
 
@@ -438,13 +455,13 @@ function bootstrap_(ctx) {
  * ========================================================================== */
 function visibleTeams_(ctx) {
   const teams = all_('Teams');
-  if (ctx.role === 'admin') return teams;
+  if (ctx.role === 'admin' || ctx.role === 'coordinator') return teams;
   if (ctx.role === 'faculty') return teams.filter(t => [t.guideId, t.coGuideId].concat(String(t.reviewerIds || '').split(',')).map(s => String(s).trim()).indexOf(ctx.facultyId) >= 0);
   return teams.filter(t => t.id === ctx.teamId);
 }
 
 function teamSummaries_(ctx) {
-  const teams = visibleTeams_(ctx).filter(t => ctx.role === 'admin' || String(t.status) !== 'Archived');
+  const teams = visibleTeams_(ctx).filter(t => ctx.role === 'admin' || ctx.role === 'coordinator' || String(t.status) !== 'Archived');
   if (!teams.length) return [];
   const students = all_('Students').filter(s => bool_(s.active));
   const faculty = all_('Faculty');
@@ -500,7 +517,7 @@ function sectionComplete_(sec, data, theme) {
     return rows.length >= Math.max(minRows_(sec, theme), 1);
   }
   if (sec.type === 'fields') {
-    const f = (sec.fields || []).filter(x => x.type !== 'info' && !x.post && !/reason/i.test(x.id));
+    const f = (sec.fields || []).filter(x => x.type !== 'info' && !x.post && !x.optional && !/reason/i.test(x.id));
     return f.length > 0 && f.every(x => String((data.values || {})[x.id] || '').trim());
   }
   return false;
@@ -546,7 +563,7 @@ function getTeam_(ctx, teamId) {
   const comments = where_('Comments', 'teamId', teamId).map(c => ({ id: c.id, stageId: c.stageId, sectionId: c.sectionId, authorName: c.authorName, authorEmail: c.authorEmail, role: c.role, text: c.text, createdAt: c.createdAt }));
   const showMarks = ctx.role !== 'student' || settings_().showMarksToStudents;
   const reviews = where_('Reviews', 'teamId', teamId).map(r => ({
-    id: r.id, reviewId: r.reviewId, facultyName: r.facultyName, gate: safeJson_(r.gateJson, {}), bands: showMarks ? safeJson_(r.bandsJson, {}) : {},
+    id: r.id, reviewId: r.reviewId, facultyName: r.facultyName, gate: safeJson_(r.gateJson, {}), bands: safeJson_(r.bandsJson, {}),
     lensNotes: r.lensNotes, marks: showMarks ? r.marks : '', decision: r.decision, comment: r.comment,
     extra: showMarks ? safeJson_(r.extraJson, {}) : {}, updatedAt: r.updatedAt
   }));
@@ -616,7 +633,14 @@ function sanitizeData_(sec, data) {
   }
   if (sec.type === 'fields') {
     const v = {};
-    (sec.fields || []).filter(f => f.type !== 'info').forEach(f => v[f.id] = clean_((data.values || {})[f.id], 20000));
+    (sec.fields || []).filter(f => f.type !== 'info').forEach(f => {
+      let val = clean_((data.values || {})[f.id], 20000);
+      if (f.type === 'url' && val) {
+        if (!/^https?:\/\/[^\s<>"']+$/i.test(val)) throw new Error('"' + f.label + '" must be a full web address starting with https://');
+        val = val.slice(0, 1000);
+      }
+      v[f.id] = val;
+    });
     return { values: v };
   }
   throw new Error('This section does not store records.');
@@ -1011,16 +1035,17 @@ function mentorChat_(ctx, a) {
   const msg = clean_(a.message, 4000);
   if (!msg) throw new Error('Type a message.');
   const s = settings_();
-  const rk = resolveTeamKey_(team);
-  if (!rk) throw new Error('AI Mentor is not configured yet. Ask the administrator to set the Gemini API key.');
+  const own = ctx.role === 'student' ? studentKey_(ctx) : null;
+  const rk = own ? { id: 'student', key: own.key } : resolveTeamKey_(team);
+  if (!rk) throw new Error('AI Mentor is not configured yet. Add your own Gemini API key (AI Mentor → "My Gemini key"), or ask the administrator.');
   const key = rk.key, keyId = rk.id;
   const meta = keysMeta_().filter(k => k.id === keyId)[0];
-  const model = team.model || (meta && meta.model) || s.defaultModel;
+  const model = (own && own.model) || team.model || (meta && meta.model) || s.defaultModel;
 
   const log = where_('MentorLog', 'teamId', team.id);
   const today = now_().slice(0, 10);
   const usedToday = log.filter(m => m.role === 'user' && String(m.createdAt).slice(0, 10) === today).length;
-  if (ctx.role !== 'admin' && usedToday >= Number(s.mentorDailyLimit || 40)) throw new Error('Your team has reached today\'s AI Mentor limit (' + s.mentorDailyLimit + ' messages). Try again tomorrow.');
+  if (ctx.role !== 'admin' && !own && usedToday >= Number(s.mentorDailyLimit || 40)) throw new Error('Your team has reached today\'s AI Mentor limit (' + s.mentorDailyLimit + ' messages). Try again tomorrow.');
 
   const stage = a.stageId ? stageById_(a.stageId) : null;
   const theme = themeById_(team.themeId);
@@ -1067,17 +1092,25 @@ function mentorNote_(ctx, a) {
 /* ============================================================================
  * ADMIN — faculty, students, teams, settings, stages
  * ========================================================================== */
-function adminData_() {
-  const s = settings_();
+function adminData_(ctx) {
+  const full = !ctx || ctx.role === 'admin';
+  const s = full ? settings_() : {};
   return {
     faculty: all_('Faculty').map(strip_), students: all_('Students').map(strip_), teams: all_('Teams').map(strip_),
-    keys: keysMeta_(), settings: s, owner: ownerEmail_(),
+    keys: full ? keysMeta_() : [], settings: s, owner: ownerEmail_(),
     links: { spreadsheet: ss_().getUrl(), folder: 'https://drive.google.com/drive/folders/' + PROP.getProperty('ROOT_FOLDER_ID') }
   };
 }
 function strip_(o) { const c = Object.assign({}, o); delete c._row; return c; }
 
 function saveFaculty_(ctx, a) {
+  const ROLES = ['Faculty', 'Coordinator', 'Reviewer', 'HoD/Admin'];
+  const role = ROLES.indexOf(a.role) >= 0 ? a.role : 'Faculty';
+  if (ctx && ctx.role !== 'admin') {
+    if (role === 'HoD/Admin') throw new Error('Only the HoD / Admin can grant the HoD/Admin role.');
+    const cur = a.id ? one_('Faculty', 'id', a.id) : null;
+    if (cur && String(cur.role) === 'HoD/Admin') throw new Error('Only the HoD / Admin can edit an HoD/Admin account.');
+  }
   const email = clean_(a.email).toLowerCase();
   if (!clean_(a.name)) throw new Error('Name is required.');
   if (email) {   // optional — without an email the person simply cannot sign in yet
@@ -1087,7 +1120,7 @@ function saveFaculty_(ctx, a) {
     if (where_('Students', 'email', email).length) throw new Error('This email is registered as a student.');
   }
   const row = { name: clean_(a.name, 120), email: email, designation: clean_(a.designation, 120), phone: clean_(a.phone, 30),
-                role: a.role === 'HoD/Admin' ? 'HoD/Admin' : 'Faculty', active: a.active === false ? 'false' : 'true', updatedAt: now_() };
+                role: role, active: a.active === false ? 'false' : 'true', updatedAt: now_() };
   if (a.id) {
     const ex = one_('Faculty', 'id', a.id); if (!ex) throw new Error('Faculty not found.');
     update_('Faculty', ex._row, row);
@@ -1098,6 +1131,7 @@ function saveFaculty_(ctx, a) {
 function deleteFaculty_(ctx, a) {
   const ex = one_('Faculty', 'id', a.id);
   if (!ex) throw new Error('Faculty not found.');
+  if (ctx.role !== 'admin' && String(ex.role) === 'HoD/Admin') throw new Error('Only the HoD / Admin can remove an HoD/Admin account.');
   all_('Teams').forEach(t => {
     const upd = {};
     if (t.guideId === a.id) upd.guideId = '';
@@ -1116,7 +1150,7 @@ function bulkFaculty_(ctx, a) {
   String(a.text || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean).forEach(line => {
     const p = line.split(/\t|,/).map(x => x.trim());
     if (/^name$/i.test(p[0])) return;
-    try { saveFaculty_(ctx, { name: p[0], email: p[1], designation: p[2] || '', role: /admin|hod/i.test(p[3] || '') ? 'HoD/Admin' : 'Faculty' }); res.added++; }
+    try { saveFaculty_(ctx, { name: p[0], email: p[1], designation: p[2] || '', role: /admin|hod/i.test(p[3] || '') ? 'HoD/Admin' : /coord/i.test(p[3] || '') ? 'Coordinator' : /review/i.test(p[3] || '') ? 'Reviewer' : 'Faculty' }); res.added++; }
     catch (e) { res.skipped.push(line + ' — ' + e.message); }
   });
   return res;
@@ -1268,4 +1302,34 @@ function sendReminder_(ctx, a) {
   });
   audit_(ctx, 'sendReminder', '', { subject: subject, teams: plan.map(p => p.team.name), recipients: recipients, skipped: skipped });
   return { teamsEmailed: sent, recipients: recipients, skipped: skipped, quotaLeft: MailApp.getRemainingDailyQuota() };
+}
+
+/* ============================================================================
+ * STUDENT'S OWN GEMINI KEY — kept in Script Properties, never sent back
+ * ========================================================================== */
+function studentKey_(ctx) {
+  if (!ctx || !ctx.studentId) return null;
+  const raw = PROP.getProperty('GEMINI_STUKEY_' + ctx.studentId);
+  if (!raw) return null;
+  const o = safeJson_(raw, null);
+  return o && o.key ? o : null;
+}
+function myKeyStatus_(ctx) {
+  const k = studentKey_(ctx);
+  return k ? { hasKey: true, last4: String(k.key).slice(-4), model: k.model || '', savedAt: k.savedAt || '' } : { hasKey: false };
+}
+function saveMyKey_(ctx, a) {
+  const key = clean_(a.key, 400);
+  if (!/^[A-Za-z0-9._\-]{20,400}$/.test(key)) throw new Error('That does not look like a valid Gemini API key (no spaces or line breaks allowed).');
+  const model = clean_(a.model, 80) || settings_().defaultModel;
+  // Verify the key works before storing it
+  callGemini_(key, model, 'You are a connectivity test.', [{ role: 'user', parts: [{ text: 'Reply with exactly: OK' }] }], 0, 4000);
+  PROP.setProperty('GEMINI_STUKEY_' + ctx.studentId, JSON.stringify({ key: key, model: model, savedAt: now_() }));
+  audit_(ctx, 'saveMyKey', ctx.teamId, '…' + key.slice(-4) + ' (' + model + ')');
+  return myKeyStatus_(ctx);
+}
+function deleteMyKey_(ctx) {
+  PROP.deleteProperty('GEMINI_STUKEY_' + ctx.studentId);
+  audit_(ctx, 'deleteMyKey', ctx.teamId, '');
+  return { hasKey: false };
 }

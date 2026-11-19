@@ -34,6 +34,10 @@ var DEPARTMENT = Object.freeze({
  * These always get full admin access, even if not added in the Faculty tab. */
 var ADMIN_EMAILS = ['shreyashalingali@gmail.com'];
 
+/* Bump this whenever defaultStages_() changes: the live portfolio structure is
+ * refreshed automatically on the next request (saved student records are kept). */
+var STRUCTURE_VERSION = '2';
+
 /* ---------------------------------------------------------------------------
  * THEMES (Handbook Ch. 2, 3, 5.2, 6, 8)
  * ------------------------------------------------------------------------- */
@@ -416,7 +420,8 @@ function defaultStages_() {
         { id: 'P-NEED', title: 'Project Statement', type: 'fields', fields: [
           { id: 'title', label: 'Artefact-based project title', type: 'text', hint: 'Artefact, not application — e.g. "Buck Converter System", not "Phone charger"' },
           { id: 'application', label: 'Application context (why this artefact matters)', type: 'textarea' },
-          { id: 'spec', label: 'Application specification (V_in range, load range, speed range, thresholds…)', type: 'textarea', hint: 'Dependency chain: this is what you must know before starting S1.' }
+          { id: 'spec', label: 'Application specification (V_in range, load range, speed range, thresholds…)', type: 'textarea', hint: 'Dependency chain: this is what you must know before starting S1.' },
+          { id: 'website', label: 'Project website link', type: 'url', optional: true, hint: 'Full address starting with https:// — e.g. your Google Site, GitHub page or project page.' }
         ] },
         { id: 'P-ROLES', title: 'Member Ownership of S2 Functional Blocks', type: 'table', desc: 'Each member must independently explain their own S2 block at the Individual Viva.', columns: [
           col_('member', 'Member (name / USN)'), col_('block', 'S2 functional block owned'), col_('responsibility', 'Responsibilities', { type: 'textarea' })

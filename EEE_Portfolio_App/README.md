@@ -65,7 +65,7 @@ The app sets `XFrameOptionsMode.ALLOWALL` so that Sites can embed it.
 ## 6. First-time administration (all done in the UI)
 
 1. Open the web app as the owner → **Administration**.
-2. **Faculty**: add guides (singly or in bulk). Give the HoD the role `HoD/Admin`.
+2. **Faculty**: add guides (singly or in bulk). Roles: `Faculty` (own teams), `Coordinator` / `Reviewer` (Administration + all portfolios + reviews, but no Gemini keys or settings), `HoD/Admin` (everything).
 3. **Teams**: create teams, choose one of the 6 themes and an artefact, assign a guide, co-guide and reviewers, and tick members. A Drive evidence folder is created and shared automatically.
 4. **Students**: add them singly or use **Import 2026–27 class list**, or bulk-paste `SRN, Name, Email (optional), Team name`.
 5. **Gemini AI**: click **Test** on the environment key, set the default model, daily limit and temperature, and optionally assign keys or models per team.

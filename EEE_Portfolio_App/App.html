@@ -37,9 +37,18 @@
       const open = performance.now() - t > 120;
       const s = shield(); if (s) s.classList.toggle('on', open);
     }, 1500);
+    // No pasting for students: worksheets must be typed in their own words.
+    // Fields marked data-allowpaste (website link, evidence link, API key) are exempt.
+    let noPaste = false, lastWarn = 0;
+    const pasteBlocked = t => noPaste && isField(t) && !(t.closest && t.closest('[data-allowpaste]'));
+    const warn = () => { const n = Date.now(); if (n - lastWarn > 2500) { lastWarn = n; toast('Pasting is not allowed — please type your answer in your own words.', 'bad'); } };
+    const stop = e => { if (pasteBlocked(e.target)) { e.preventDefault(); e.stopPropagation(); warn(); } };
+    document.addEventListener('paste', stop, true);
+    document.addEventListener('drop', stop, true);
+    document.addEventListener('beforeinput', e => { if (/^insertFrom(Paste|Drop|PasteAsQuotation|YankRing)$/.test(e.inputType || '')) stop(e); }, true);
     // Keep the console empty
     try { const noop = function () {}; ['log', 'info', 'warn', 'debug', 'table', 'dir'].forEach(m => { console[m] = noop; }); } catch (e) { /* ignore */ }
-    return { isField: isField };
+    return { isField: isField, setNoPaste: v => { noPaste = !!v; } };
   })();
 
   /* ==========================================================================
@@ -168,6 +177,7 @@
     opts = opts || {};
     return new Promise(res => {
       const ta = opts.multiline ? el('textarea', { value: opts.value || '' }) : el('input', { type: 'text', value: opts.value || '' });
+      if (opts.allowPaste) ta.dataset.allowpaste = '1';
       modal({ title: title, body: el('div', null, el('label', { class: 'f' }, label), ta, opts.hint ? el('div', { class: 'hint' }, opts.hint) : null), actions: [
         { label: 'Cancel', fn: c => { c(); res(null); } },
         { label: opts.ok || 'Save', cls: 'primary', fn: c => { const v = ta.value.trim(); if (opts.required && !v) { toast('This is required.', 'bad'); return; } c(); res(v); } }] });
@@ -213,7 +223,9 @@
    * 4. State
    * ======================================================================== */
   const S = { boot: null, view: 'home', teams: null, teamId: null, team: null, stageId: null, tab: 'portfolio', admin: null, adminTab: 'faculty', dirty: {}, mentor: null, viewOwner: {} };
-  const ROLE = { admin: 'HoD / Admin', faculty: 'Faculty Guide', student: 'Student' };
+  const ROLE = { admin: 'HoD / Admin', coordinator: 'Coordinator / Reviewer', faculty: 'Faculty Guide', student: 'Student' };
+  const isStaff = () => S.boot.user.role === 'admin' || S.boot.user.role === 'coordinator';   // department-wide access
+  const myRole = () => S.boot.user.roleLabel || ROLE[S.boot.user.role];
   const theme = id => (S.boot.themes || []).filter(t => t.id === id)[0];
   const stageList = () => (S.boot.stages || []).filter(s => s.enabled).sort((a, b) => a.order - b.order);
   const isDirty = () => Object.keys(S.dirty).length > 0;
@@ -233,6 +245,7 @@
       if (S.boot.needLogin) return renderLogin();
       if (S.boot.notRostered) return renderNotRostered();
       document.title = S.boot.dept.shortName + ' Mini Project Portfolio';
+      Guard.setNoPaste(S.boot.user.role === 'student');
       S.view = S.boot.user.role === 'student' ? 'team' : 'home';
       if (S.boot.user.role === 'student') S.teamId = S.boot.user.teamId;
       renderShell();
@@ -311,7 +324,7 @@
   let contentEl, titleEl, navEl, appEl;
   function navItems() {
     const r = S.boot.user.role;
-    if (r === 'admin') return [['h', 'Department'], ['home', 'chart', 'Dashboard'], ['teams', 'folder', 'Team Portfolios'], ['h', 'Manage'], ['admin', 'settings', 'Administration'], ['h', 'Reference'], ['handbook', 'book', 'Handbook']];
+    if (r === 'admin' || r === 'coordinator') return [['h', 'Department'], ['home', 'chart', 'Dashboard'], ['teams', 'folder', 'Team Portfolios'], ['h', 'Manage'], ['admin', 'settings', 'Administration'], ['h', 'Reference'], ['handbook', 'book', 'Handbook']];
     if (r === 'faculty') return [['h', 'Guide'], ['home', 'chart', 'My Teams'], ['h', 'Reference'], ['handbook', 'book', 'Handbook']];
     return [['h', 'My Project'], ['team', 'folder', 'My Portfolio'], ['mentor', 'bot', 'AI Mentor'], ['reviews', 'star', 'Reviews & Feedback'], ['h', 'Reference'], ['handbook', 'book', 'Handbook']];
   }
@@ -328,13 +341,13 @@
         el('div', { class: 'brand' + (window.KLE_LOGO ? ' with-logo' : '') }, logoImg(),
           el('div', { class: 'row', style: { flexWrap: 'nowrap' } }, el('div', { class: 'logo' }, d.shortName), el('div', null, el('div', { class: 'brand-t' }, d.name), el('div', { class: 'brand-s' }, d.institution)))),
         navEl,
-        el('div', { class: 'side-foot' }, el('b', null, d.course), el('div', null, d.semester + ' · AY ' + d.academicYear), el('div', { class: 'tiny', style: { marginTop: '6px', opacity: .8 } }, 'Signed in as ' + ROLE[u.role] + ' · v' + S.boot.version))),
+        el('div', { class: 'side-foot' }, el('b', null, d.course), el('div', null, d.semester + ' · AY ' + d.academicYear), el('div', { class: 'tiny', style: { marginTop: '6px', opacity: .8 } }, 'Signed in as ' + myRole() + ' · v' + S.boot.version))),
       el('div', { class: 'scrim', onclick: () => appEl.classList.remove('nav-open') }),
       el('div', { class: 'main' },
         el('header', { class: 'topbar' },
           el('button', { class: 'btn ghost sm menu-btn', 'aria-label': 'Open menu', onclick: () => appEl.classList.add('nav-open') }, icon('menu')),
           titleEl, el('div', { class: 'spacer' }), themeBtn,
-          el('div', { class: 'user-chip' }, el('div', { class: 'avatar' }, initials(u.name)), el('div', { class: 'user-meta' }, el('b', null, u.name || u.email), el('span', { class: 'tiny muted' }, ROLE[u.role]))),
+          el('div', { class: 'user-chip' }, el('div', { class: 'avatar' }, initials(u.name)), el('div', { class: 'user-meta' }, el('b', null, u.name || u.email), el('span', { class: 'tiny muted' }, myRole()))),
           el('button', { class: 'btn ghost sm', title: 'Sign out', 'aria-label': 'Sign out', onclick: logout }, icon('logout'))),
         contentEl,
         el('footer', { class: 'app-foot' }, el('span', null, '© ' + new Date().getFullYear() + ' ' + d.institution + ' · ' + d.name), el('span', null, d.cycleName + ' · Handbook ' + d.handbookVersion))));
@@ -345,7 +358,7 @@
     navItems().forEach(it => {
       if (it[0] === 'h') { navEl.appendChild(el('div', { class: 'nav-h' }, it[1])); return; }
       const r = S.boot.user.role;
-      const active = (r === 'student' && S.view === 'team') ? (it[0] === (S.tab === 'mentor' || S.tab === 'reviews' ? S.tab : 'team')) : S.view === it[0] || (it[0] === 'teams' && S.view === 'team' && S.boot.user.role === 'admin') || (it[0] === 'home' && S.view === 'team' && S.boot.user.role === 'faculty');
+      const active = (r === 'student' && S.view === 'team') ? (it[0] === (S.tab === 'mentor' || S.tab === 'reviews' ? S.tab : 'team')) : S.view === it[0] || (it[0] === 'teams' && S.view === 'team' && isStaff()) || (it[0] === 'home' && S.view === 'team' && S.boot.user.role === 'faculty');
       navEl.appendChild(el('button', { class: active ? 'active' : '', onclick: () => go(it[0]) }, icon(it[1]), it[2]));
     });
   }
@@ -379,7 +392,7 @@
    * ======================================================================== */
   async function viewDashboard(listOnly) {
     const u = S.boot.user;
-    setTitle(u.role === 'admin' ? (listOnly ? 'Team Portfolios' : 'Department Dashboard') : 'My Teams');
+    setTitle(isStaff() ? (listOnly ? 'Team Portfolios' : 'Department Dashboard') : 'My Teams');
     clear(contentEl).appendChild(loader('Loading teams…'));
     try { S.teams = await call('teamList'); } catch (e) { clear(contentEl).appendChild(el('div', { class: 'alert bad' }, icon('alert'), e.message)); return; }
     const teams = S.teams, stages = stageList(), reviews = S.boot.reviews;
@@ -387,7 +400,7 @@
     const c = clear(contentEl);
     if (!listOnly) {
       c.appendChild(el('div', { class: 'hero' }, el('div', { class: 'kicker' }, S.boot.dept.course + ' · ' + S.boot.dept.semester + ' · AY ' + S.boot.dept.academicYear),
-        el('h1', { style: { marginTop: '6px' } }, S.boot.dept.name), el('p', null, S.boot.dept.institution + ' — ' + S.boot.dept.cycleName + '. ' + (u.role === 'admin' ? 'Department-wide view of every team portfolio.' : 'Teams assigned to you as guide, co-guide or reviewer.'))));
+        el('h1', { style: { marginTop: '6px' } }, S.boot.dept.name), el('p', null, S.boot.dept.institution + ' — ' + S.boot.dept.cycleName + '. ' + (isStaff() ? 'Department-wide view of every team portfolio.' : 'Teams assigned to you as guide, co-guide or reviewer.'))));
       const students = teams.reduce((a, t) => a + t.members.length, 0);
       const r3 = teams.filter(t => (t.reviews.R3 || {}).decision === 'Cleared').length;
       const flagged = teams.filter(t => t.flags.length).length;
@@ -403,7 +416,7 @@
       clear(body);
       const s = q.value.toLowerCase();
       const list = teams.filter(t => (!th.value || t.themeId === th.value) && (!s || [t.name, t.title, t.artefact, t.guide, t.coGuide].concat(t.members).join(' ').toLowerCase().indexOf(s) >= 0));
-      if (!list.length) body.appendChild(el('tr', null, el('td', { colspan: 5 + reviews.length, class: 'muted', style: { textAlign: 'center', padding: '28px' } }, teams.length ? 'No teams match.' : (u.role === 'admin' ? 'No teams yet — create them in Administration → Teams.' : 'No teams are assigned to you yet.'))));
+      if (!list.length) body.appendChild(el('tr', null, el('td', { colspan: 5 + reviews.length, class: 'muted', style: { textAlign: 'center', padding: '28px' } }, teams.length ? 'No teams match.' : (isStaff() ? 'No teams yet — create them in Administration → Teams.' : 'No teams are assigned to you yet.'))));
       list.forEach(t => {
         const th_ = theme(t.themeId) || {};
         body.appendChild(el('tr', { style: { cursor: 'pointer' }, onclick: () => go('team', { teamId: t.id, tab: 'portfolio', stageId: null }) },
@@ -455,6 +468,7 @@
           el('div', { class: 'row' }, el('h1', null, T.team.name), (th.id ? el('span', { class: 'badge brand' }, th.id + ' · ' + th.name) : el('span', { class: 'badge warn' }, 'Theme not set yet')), T.team.status === 'Archived' ? el('span', { class: 'badge' }, 'Archived') : null),
           T.team.title ? el('div', { class: 'team-title', style: { fontSize: '15px', fontWeight: 600, maxWidth: 'none', marginTop: '6px' } }, T.team.title) : el('div', { class: 'small muted', style: { marginTop: '4px' } }, 'Project title not set yet'),
           el('div', { class: 'small muted', style: { marginTop: '2px' } }, T.team.artefact ? 'Artefact: ' + T.team.artefact : 'Artefact not selected yet'),
+          websiteLink(),
           el('div', { class: 'small muted', style: { marginTop: '6px' } }, 'Guide: ', el('b', null, T.guide ? T.guide.name : '—'), T.coGuide ? ' · Co-guide: ' + T.coGuide.name : '', ' · Members: ', T.members.map(m => m.name).join(', ') || '—')),
         el('div', { class: 'row' }, el('span', { class: 'badge ' + (T.debugCycles >= 3 ? 'ok' : T.debugCycles ? 'warn' : '') }, 'Debug cycles: ' + T.debugCycles), T.flags.length ? el('span', { class: 'badge bad' }, '⚑ ' + T.flags.length + ' integrity flag(s)') : null)),
       T.flags.length && S.boot.user.role !== 'student' ? el('div', { class: 'alert bad', style: { marginTop: '12px' } }, icon('alert'), el('div', null, T.flags.map(f => el('div', null, f)))) : null)));
@@ -467,6 +481,13 @@
     else if (S.tab === 'reviews') drawReviews(pane);
     else if (S.tab === 'mentor') drawMentor(pane);
     else drawInfo(pane);
+  }
+
+  function websiteLink() {
+    const r = S.team.records['P-NEED'];
+    const url = r && r.data && r.data.values ? String(r.data.values.website || '') : '';
+    if (!/^https?:\/\//i.test(url)) return null;   // only http(s) links are ever rendered
+    return el('div', { class: 'small', style: { marginTop: '4px' } }, el('a', { href: url, target: '_blank', rel: 'noopener noreferrer' }, icon('link'), ' Project website'));
   }
 
   /* ---------- Portfolio: stage navigator + stage content ---------- */
@@ -504,10 +525,15 @@
       el('div', { class: 'row small muted', style: { margin: '8px 0 10px' } },
         el('span', null, '⏱ ', stage.due || '—'), rv ? el('span', null, '· ', rv.name) : null, rub ? el('span', null, '· Rubric: ' + rub.name + ' (' + rub.marks + ')') : null),
       el('p', { style: { margin: 0 } }, stage.purpose))));
+    const fb = S.team.reviews.filter(r => r.reviewId === stage.review && (r.comment || r.decision))[0];
+    if (fb) main.appendChild(el('div', { class: 'alert ' + (fb.decision === 'Cleared' ? 'ok' : fb.decision === 'Not cleared' ? 'bad' : ''), style: { marginBottom: '18px', display: 'block' } },
+      el('div', { class: 'row' }, icon('msg'), el('b', null, (rv ? rv.name : 'Review') + ' feedback'), decisionBadge(fb.decision), el('span', { class: 'tiny', style: { opacity: .8 } }, (fb.facultyName || '') + (fb.updatedAt ? ' · ' + fmt(fb.updatedAt) : ''))),
+      fb.comment ? el('div', { class: 'selectable', style: { whiteSpace: 'pre-wrap', marginTop: '6px', color: 'var(--ink)' } }, fb.comment) : null));
     if (stage.gate && S.team.gates[stage.gate] !== 'Cleared' && S.boot.settings.enforceGates) {
       const g = S.boot.reviews.filter(r => r.id === stage.gate)[0];
       main.appendChild(el('div', { class: 'alert warn', style: { marginBottom: '18px' } }, icon('lock'), el('div', null, el('b', null, 'Hard gate: '), (g ? g.name : stage.gate) + ' must be cleared by your guide before this stage can be recorded. ', S.boot.user.role === 'admin' ? '(Admins can still edit.)' : '')));
     }
+    if (S.boot.user.role === 'student') main.appendChild(el('div', { class: 'alert', style: { marginBottom: '18px' } }, icon('edit'), el('div', null, el('b', null, 'Type it yourself: '), 'pasting is disabled in worksheets. Write every answer in your own words — reviewers check that each member understands the work.')));
     (stage.sections || []).forEach(sec => main.appendChild(drawSection(stage, sec)));
   }
 
@@ -621,7 +647,7 @@
       };
       wrap.appendChild(b);
     }
-    if ((u.role === 'faculty' || u.role === 'admin') && rec && (rec.lockedAt || sigs.length)) {
+    if ((u.role === 'faculty' || isStaff()) && rec && (rec.lockedAt || sigs.length)) {
       const b = el('button', { class: 'btn danger sm' }, icon('unlock'), 'Unlock');
       b.onclick = async () => {
         const reason = await promptBox('Unlock signed section', 'Documented reason (visible to the team, kept in the audit log)', { multiline: true, required: true, ok: 'Unlock' });
@@ -638,6 +664,7 @@
     let i;
     if (col.type === 'select') i = select(col.options || [''], value, { disabled: disabled });
     else if (col.type === 'textarea') i = el('textarea', { value: value || '', disabled: disabled, rows: 2, placeholder: col.hint || '' });
+    else if (col.type === 'url') { i = el('input', { type: 'url', inputmode: 'url', value: value || '', disabled: disabled, placeholder: 'https://…' }); i.dataset.allowpaste = '1'; }
     else i = el('input', { type: col.type === 'date' ? 'date' : col.type === 'number' ? 'number' : 'text', value: value || '', disabled: disabled, placeholder: col.hint || '' });
     i.addEventListener(col.type === 'select' ? 'change' : 'input', () => onChange(i.value));
     i.setAttribute('aria-label', col.label);
@@ -771,7 +798,7 @@
       }
       const linkBtn = el('button', { class: 'btn sm' }, icon('link'), 'Add link');
       linkBtn.onclick = async () => {
-        const url = await promptBox('Add evidence link', 'HTTPS link (Drive file, Git repository, video…)', { required: true, ok: 'Add' });
+        const url = await promptBox('Add evidence link', 'HTTPS link (Drive file, Git repository, video…)', { required: true, ok: 'Add', allowPaste: true });
         if (!url) return;
         try { const e = await call('addLinkEvidence', { teamId: T.team.id, stageId: stage.id, sectionId: sec.id, url: url, caption: caption.value.trim() }); T.evidence.push(e); caption.value = ''; draw(); refreshProgress(); }
         catch (x) { toast(x.message, 'bad'); }
@@ -814,9 +841,10 @@
    * ======================================================================== */
   function drawReviews(pane) {
     const T = S.team, u = S.boot.user, th = theme(T.team.themeId) || { map: {} };
-    const canReview = u.role === 'faculty' || u.role === 'admin';
+    const canReview = u.role === 'faculty' || isStaff();
     const showMarks = u.role !== 'student' || S.boot.settings.showMarksToStudents;
     const byId = {}; T.reviews.forEach(r => byId[r.reviewId] = r);
+    if (!canReview) pane.appendChild(feedbackSummary(byId));
 
     if (showMarks) {
       const fin = byId.FINAL || {};
@@ -848,8 +876,8 @@
       b.appendChild(el('div', { style: { margin: '6px 0 14px' } }, rv.gate.map((g, i) => el('label', { class: 'check' }, gateInputs[i], el('span', null, g)))));
 
       const bandSel = {};
-      if (showMarks || canReview) {
-        b.appendChild(el('h4', null, 'Rubric components (Handbook 5.3)'));
+      if (true) {
+        b.appendChild(el('h4', null, canReview ? 'Rubric components (Handbook 5.3)' : 'Rubric grades given by your reviewer'));
         const rows = rv.rubric.map(cid => {
           const comp = S.boot.rubric.filter(x => x.id === cid)[0];
           bandSel[cid] = select([{ v: '', l: 'Not yet due' }].concat(S.boot.bands.map(bd => ({ v: bd.id, l: bd.name + ' (' + bd.range + ')' }))), (r.bands || {})[cid] || '', { disabled: !canReview });
@@ -875,7 +903,7 @@
       const extraIn = {};
       if (canReview || u.role === 'student') {
         if (canReview) b.appendChild(field('Five Lenses notes', lens));
-        else if (r.lensNotes) b.appendChild(field('Reviewer notes', el('div', { class: 'info-box selectable', style: { whiteSpace: 'pre-wrap' } }, r.lensNotes)));
+        else if (r.lensNotes) b.appendChild(field('Reviewer notes (Five Lenses)', el('div', { class: 'info-box selectable', style: { whiteSpace: 'pre-wrap' } }, r.lensNotes)));
         if (canReview) {
           b.appendChild(el('div', { class: 'grid g2' }, field('Marks awarded (out of ' + rv.marks + ')', marks, suggest), field('Gate decision', decision, rv.hardGate ? 'Teams cannot record S6/S7 until this gate is "Cleared".' : '')));
           if (rv.id === 'FINAL') {
@@ -886,7 +914,8 @@
               field('Final working artefact /5', extraIn.art = el('input', { type: 'number', min: 0, max: 5, step: 0.5, value: (r.extra || {}).artefact === undefined ? '' : r.extra.artefact }))));
           }
           b.appendChild(field('Comment to team', comment));
-        } else if (r.comment) b.appendChild(field('Feedback from ' + (r.facultyName || 'guide'), el('div', { class: 'info-box selectable', style: { whiteSpace: 'pre-wrap' } }, r.comment)));
+        } else if (r.comment) b.appendChild(field('Feedback from ' + (r.facultyName || 'guide') + (r.updatedAt ? ' · ' + fmt(r.updatedAt) : ''), el('div', { class: 'alert', style: { whiteSpace: 'pre-wrap', display: 'block' } }, r.comment)));
+        else if (!canReview && !r.decision) b.appendChild(el('p', { class: 'small muted' }, 'No feedback yet for this review.'));
         if (showMarks && !canReview && r.marks !== '' && r.marks !== undefined) b.appendChild(el('p', null, el('b', null, 'Marks: '), r.marks + ' / ' + rv.marks));
       }
       if (canReview) {
@@ -912,6 +941,21 @@
 
     pane.appendChild(el('div', { class: 'card' }, el('div', { class: 'card-h' }, el('h3', null, "The Reviewer's Five Lenses (Handbook 7.3)")),
       el('div', { class: 'card-b' }, S.boot.lenses.map(l => el('div', { style: { marginBottom: '10px' } }, el('b', null, l.n + '. ' + l.name), el('div', { class: 'small' }, l.q))))));
+  }
+
+  function feedbackSummary(byId) {
+    const got = S.boot.reviews.filter(rv => byId[rv.id] && (byId[rv.id].comment || byId[rv.id].decision || byId[rv.id].lensNotes));
+    const card = el('div', { class: 'card', style: { marginBottom: '18px' } }, el('div', { class: 'card-h' }, icon('msg'), el('h3', { style: { flex: 1 } }, 'Feedback from your reviewers'), el('span', { class: 'badge brand' }, got.length + ' review(s)')));
+    const b = el('div', { class: 'card-b' }); card.appendChild(b);
+    if (!got.length) { b.appendChild(el('p', { class: 'muted', style: { margin: 0 } }, 'No review feedback yet. It will appear here as soon as your guide saves a review.')); return card; }
+    got.forEach(rv => { const r = byId[rv.id];
+      b.appendChild(el('div', { class: 'info-box', style: { marginBottom: '10px' } },
+        el('div', { class: 'row' }, el('b', { style: { flex: 1 } }, rv.name), decisionBadge(r.decision), r.marks !== '' && r.marks !== undefined && S.boot.settings.showMarksToStudents ? el('span', { class: 'badge brand' }, r.marks + ' / ' + rv.marks) : null),
+        el('div', { class: 'tiny muted', style: { margin: '2px 0 6px' } }, (r.facultyName || 'Reviewer') + (r.updatedAt ? ' · ' + fmt(r.updatedAt) : '')),
+        r.comment ? el('div', { class: 'selectable', style: { whiteSpace: 'pre-wrap' } }, r.comment) : null,
+        r.lensNotes ? el('details', { style: { marginTop: '6px' } }, el('summary', { class: 'small', style: { cursor: 'pointer', color: 'var(--brand)' } }, 'Reviewer notes (Five Lenses)'), el('div', { class: 'small selectable', style: { whiteSpace: 'pre-wrap', marginTop: '4px' } }, r.lensNotes)) : null));
+    });
+    return card;
   }
 
   function autoChecks(rv) {
@@ -946,7 +990,7 @@
         el('div', { class: 'meta' }, (isUser ? m.userName : 'AI Mentor') + ' · ' + (stages.filter(s => s.id === m.stageId)[0] || {}).code + ' · ' + fmt(m.createdAt)),
         isUser ? el('div', { class: 'b selectable' }, m.text) : el('div', { class: 'b selectable', html: md(m.text) }),
         m.facultyNote ? el('div', { class: 'note' }, '📝 ' + (m.noteBy || 'Faculty') + ': ' + m.facultyNote) : null);
-      if (!isUser && (u.role === 'faculty' || u.role === 'admin')) {
+      if (!isUser && (u.role === 'faculty' || isStaff())) {
         node.appendChild(el('button', { class: 'btn ghost sm', style: { alignSelf: 'flex-start' }, onclick: async () => {
           const n = await promptBox('Faculty note on this mentor reply', 'Note (visible to the team)', { multiline: true, value: m.facultyNote || '' });
           if (n === null) return;
@@ -988,12 +1032,39 @@
       el('div', { class: 'card-h' }, el('div', { class: 'row', style: { flex: 1 } }, el('span', { class: 'ic avatar' }, icon('bot')), el('div', null, el('h3', null, 'AI Mentor'), el('div', { class: 'tiny muted' }, 'Gemini · team-wise history · reviewed by faculty'))),
         canChat ? el('div', { style: { minWidth: '220px', flex: '1 1 220px' } }, stageSel) : null, canChat ? el('div', { style: { minWidth: '220px', flex: '1 1 220px' } }, modeSel) : null,
         filter ? el('div', { style: { minWidth: '160px' } }, filter) : null),
-      !S.boot.settings.mentorEnabled ? el('div', { class: 'card-b' }, el('div', { class: 'alert warn' }, icon('alert'), 'The AI Mentor is not configured yet. The administrator must set the Gemini API key.')) : null,
+      u.role === 'student' ? myKeyPanel() : null,
+      !S.boot.settings.mentorEnabled ? el('div', { class: 'card-b' }, el('div', { class: 'alert warn' }, icon('alert'), u.role === 'student' ? 'The AI Mentor needs a Gemini key. Add your own key above (free from Google AI Studio), or ask the administrator.' : 'The AI Mentor is not configured yet. The administrator must set the Gemini API key.')) : null,
       el('div', { class: 'chat' }, log, canChat ? el('div', { class: 'chat-in' }, input, send) : el('div', { class: 'chat-in small muted' }, 'Read-only review of the team’s AI Mentor interactions. Add notes on replies to guide the team.')),
       canChat ? el('div', { class: 'card-b', style: { paddingTop: '6px', paddingBottom: '10px' } }, usage) : null));
 
     if (S.mentor && S.mentor._team === T.team.id) drawLog();
     else { log.appendChild(loader('Loading conversation…')); call('mentorHistory', { teamId: T.team.id }).then(h => { S.mentor = h; S.mentor._team = T.team.id; drawLog(); }).catch(e => { clear(log).appendChild(el('div', { class: 'alert bad' }, e.message)); }); }
+  }
+
+  function myKeyPanel() {
+    const box = el('div', { class: 'card-b', style: { borderBottom: '1px solid var(--line)' } });
+    const draw = st => {
+      clear(box);
+      const head = el('div', { class: 'row' }, icon('key'), el('b', { style: { flex: 1 } }, 'My Gemini key'),
+        st.hasKey ? el('span', { class: 'badge ok' }, 'Using my key ••••' + st.last4 + (st.model ? ' · ' + st.model : '')) : el('span', { class: 'badge' }, 'Using the department key'));
+      box.appendChild(head);
+      const det = el('details', { style: { marginTop: '8px' }, open: !st.hasKey && !S.boot.settings.mentorEnabled });
+      det.appendChild(el('summary', { class: 'small', style: { cursor: 'pointer', color: 'var(--brand)' } }, st.hasKey ? 'Change or remove my key' : 'Add my own key (optional)'));
+      const key = el('input', { type: 'password', autocomplete: 'off', placeholder: 'Paste your Gemini API key' }); key.dataset.allowpaste = '1';
+      const model = el('input', { type: 'text', value: st.model || '', placeholder: 'Model (optional, e.g. gemini-2.5-flash)' }); model.dataset.allowpaste = '1';
+      const save = el('button', { class: 'btn primary sm' }, icon('check'), 'Save & test');
+      save.onclick = async () => { if (!key.value.trim()) { toast('Paste your key first.', 'bad'); return; } busy(save, true, 'Testing…');
+        try { const r = await call('saveMyKey', { key: key.value.trim(), model: model.value.trim() }); key.value = ''; S.boot.settings.mentorEnabled = true; toast('Your key works and is saved securely.', 'ok'); drawTeam(); }
+        catch (e) { busy(save, false); toast(e.message, 'bad'); } };
+      const del = st.hasKey ? el('button', { class: 'btn danger sm', onclick: async () => { if (!(await confirmBox('Remove my key', 'Stop using your own Gemini key? The department key will be used instead (if available).', 'Remove', true))) return; try { await call('deleteMyKey'); toast('Removed.', 'ok'); drawTeam(); } catch (e) { toast(e.message, 'bad'); } } }, icon('trash'), 'Remove my key') : null;
+      det.appendChild(el('div', { class: 'stack', style: { marginTop: '8px' } },
+        el('div', { class: 'small muted' }, '1. Open ', el('a', { href: 'https://aistudio.google.com/apikey', target: '_blank', rel: 'noopener noreferrer' }, 'aistudio.google.com/apikey'), ' and sign in.  2. Click “Create API key”.  3. Copy it and paste it here.  Your key is checked, stored only on the server, never shown again, and never shared with your team. Messages sent with your own key do not count towards the team’s daily limit.'),
+        el('div', { class: 'grid g2' }, key, model), el('div', { class: 'row' }, save, del)));
+      box.appendChild(det);
+    };
+    box.appendChild(el('div', { class: 'small muted' }, 'Checking your key…'));
+    call('myKeyStatus').then(draw).catch(() => draw({ hasKey: false }));
+    return box;
   }
 
   /* ==========================================================================
@@ -1022,7 +1093,9 @@
     drawAdmin();
   }
   function drawAdmin() {
-    const tabs = [['faculty', 'Faculty'], ['students', 'Students'], ['teams', 'Teams'], ['gemini', 'Gemini AI'], ['settings', 'Settings'], ['audit', 'Audit log']];
+    const tabs = [['faculty', 'Faculty'], ['students', 'Students'], ['teams', 'Teams'], ['gemini', 'Gemini AI'], ['settings', 'Settings'], ['audit', 'Audit log']]
+      .filter(t => S.boot.user.role === 'admin' || (t[0] !== 'gemini' && t[0] !== 'settings'));
+    if (!tabs.some(t => t[0] === S.adminTab)) S.adminTab = 'faculty';
     const c = clear(contentEl);
     c.appendChild(el('div', { class: 'row between', style: { marginBottom: '12px' } }, el('div', null, el('h1', null, 'Administration'), el('div', { class: 'small muted' }, S.boot.dept.name + ' · all changes are saved to the backend automatically — no manual sheet edits needed.')),
       el('button', { class: 'btn primary', onclick: () => reminderModal() }, icon('send'), 'Send reminder')));
@@ -1050,7 +1123,7 @@
       const rows = A().faculty.filter(f => !s || [f.name, f.email, f.designation].join(' ').toLowerCase().indexOf(s) >= 0).map(f => {
         const teams = A().teams.filter(t => t.guideId === f.id || t.coGuideId === f.id || String(t.reviewerIds || '').split(',').indexOf(f.id) >= 0);
         return el('tr', null, el('td', null, el('b', null, f.name), el('div', { class: 'tiny muted' }, f.designation)), el('td', { class: 'small' }, f.email || el('span', { class: 'badge warn' }, 'No email — cannot sign in')),
-          el('td', null, el('span', { class: 'badge ' + (f.role === 'HoD/Admin' ? 'brand' : '') }, f.role)), el('td', null, isTrue(f.active) ? el('span', { class: 'badge ok' }, 'Active') : el('span', { class: 'badge' }, 'Inactive')),
+          el('td', null, el('span', { class: 'badge ' + (f.role === 'HoD/Admin' ? 'brand' : f.role === 'Coordinator' || f.role === 'Reviewer' ? 'ok' : '') }, f.role)), el('td', null, isTrue(f.active) ? el('span', { class: 'badge ok' }, 'Active') : el('span', { class: 'badge' }, 'Inactive')),
           el('td', { class: 'small' }, teams.map(t => t.name).join(', ') || el('span', { class: 'muted' }, '—')),
           el('td', null, el('div', { class: 'row', style: { flexWrap: 'nowrap' } }, el('button', { class: 'btn sm', onclick: () => editFaculty(f) }, icon('edit'), 'Edit'),
             el('button', { class: 'btn sm danger', 'aria-label': 'Remove', onclick: async () => { if (!(await confirmBox('Remove faculty', 'Remove ' + f.name + '? They will be unassigned from all teams.', 'Remove', true))) return; try { A().faculty = await call('deleteFaculty', { id: f.id }); A().teams = (await call('adminData')).teams; drawAdmin(); toast('Removed.', 'ok'); } catch (e) { toast(e.message, 'bad'); } } }, icon('trash')))));
@@ -1059,12 +1132,12 @@
         ['Name', 'Email', 'Role', 'Status', 'Assigned teams', ''], rows, 'No faculty yet. Add guides and the HoD here.'));
     };
     q.oninput = draw; draw(); pane.appendChild(holder);
-    pane.appendChild(el('p', { class: 'small muted', style: { marginTop: '10px' } }, 'The script owner (' + A().owner + ') is always an administrator. Faculty with role "HoD/Admin" also get full department access.'));
+    pane.appendChild(el('p', { class: 'small muted', style: { marginTop: '10px' } }, 'Roles — Faculty: guides see their own teams. Coordinator / Reviewer: Administration (faculty, students, teams, reminders, audit) and every team portfolio. HoD/Admin: everything, including Gemini keys and settings. The script owner (' + A().owner + ') is always HoD/Admin.'));
   }
   function editFaculty(f) {
     const i = { name: el('input', { type: 'text', value: f.name || '' }), email: el('input', { type: 'email', value: f.email || '' }), designation: el('input', { type: 'text', value: f.designation || '', placeholder: 'Assistant Professor' }),
-      phone: el('input', { type: 'text', value: f.phone || '' }), role: select(['Faculty', 'HoD/Admin'], f.role || 'Faculty'), active: el('input', { type: 'checkbox', checked: f.id ? isTrue(f.active) : true }) };
-    modal({ title: f.id ? 'Edit faculty' : 'Add faculty', body: el('div', null, el('div', { class: 'grid g2' }, field('Full name', i.name), field('Email (Google account)', i.email, 'Optional — needed only to sign in.'), field('Designation', i.designation), field('Phone', i.phone), field('Role', i.role)), el('label', { class: 'check' }, i.active, 'Active')),
+      phone: el('input', { type: 'text', value: f.phone || '' }), role: select(S.boot.user.role === 'admin' ? ['Faculty', 'Coordinator', 'Reviewer', 'HoD/Admin'] : ['Faculty', 'Coordinator', 'Reviewer'], f.role || 'Faculty'), active: el('input', { type: 'checkbox', checked: f.id ? isTrue(f.active) : true }) };
+    modal({ title: f.id ? 'Edit faculty' : 'Add faculty', body: el('div', null, el('div', { class: 'grid g2' }, field('Full name', i.name), field('Email (Google account)', i.email, 'Optional — needed only to sign in.'), field('Designation', i.designation), field('Phone', i.phone), field('Role', i.role, 'Coordinator / Reviewer: Administration + all team portfolios + reviews. HoD/Admin: everything incl. Gemini keys & settings.')), el('label', { class: 'check' }, i.active, 'Active')),
       actions: [{ label: 'Cancel', fn: c => c() }, { label: 'Save', cls: 'primary', fn: async c => { try { A().faculty = await call('saveFaculty', { id: f.id, name: i.name.value, email: i.email.value, designation: i.designation.value, phone: i.phone.value, role: i.role.value, active: i.active.checked }); c(); drawAdmin(); toast('Saved.', 'ok'); } catch (e) { toast(e.message, 'bad'); } } }] });
   }
   function bulk(kind) {

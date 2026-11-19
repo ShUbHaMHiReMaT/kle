@@ -10,25 +10,40 @@ Teachers check the work and give marks here.
 It is like a big online notebook for every project team.
 
 
-WHO USES IT?  (3 KINDS OF PEOPLE)
+WHO USES IT?  (4 KINDS OF PEOPLE)
 --------------------------------
 1. ADMIN (HoD / Boss)
    - Can see EVERYTHING.
    - Adds teachers, adds students, makes teams.
-   - Puts in the AI key.
+   - Puts in the department AI key and changes the settings.
    - Admin emails: the owner of the Google account
      AND shreyashalingali@gmail.com
 
-2. TEACHER (Guide)
+2. CO-ORDINATOR and REVIEWER
+   - Can open "Administration": add teachers, students, teams,
+     send reminders and read the audit log.
+   - Can see EVERY team's portfolio and give reviews.
+   - Cannot see the AI keys or change the settings.
+   - Cannot make anyone an Admin.
+   (Admin sets this: Administration -> Faculty -> Edit -> Role)
+
+3. TEACHER (Guide)
    - Sees only HIS or HER own teams.
    - Reads the students' work.
    - Writes comments and gives marks.
    - Cannot change the students' work.
 
-3. STUDENT
+4. STUDENT
    - Sees only HIS or HER own team.
    - Fills tables, writes answers, uploads photos and files.
-   - Can talk to the AI Mentor.
+   - Adds the project website link in "Project Profile".
+   - Sees all review feedback (R1, R2 ...) in "Reviews & Feedback"
+     and also at the top of each stage page.
+   - Can talk to the AI Mentor, and can use his or her OWN free
+     Gemini key (AI Mentor -> "My Gemini key").
+   - CANNOT PASTE in the worksheets. Everything must be typed
+     in your own words. (Pasting is allowed only for links and
+     for the AI key.)
 
 
 WHERE IS EVERYTHING KEPT?
