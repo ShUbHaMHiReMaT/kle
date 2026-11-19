@@ -14,7 +14,10 @@
   const Guard = (function () {
     const isField = t => t && (t.closest && t.closest('input, textarea, select, [contenteditable="true"]'));
     // Right-click disabled everywhere
-    document.addEventListener('contextmenu', e => { e.preventDefault(); e.stopPropagation(); return false; }, true);
+    document.addEventListener('contextmenu', e => {
+      if (e.target && e.target.closest && e.target.closest('[data-allowpaste]')) return;   // API key / link boxes: allow Paste menu
+      e.preventDefault(); e.stopPropagation(); return false;
+    }, true);
     // Inspect / view-source / save / print shortcuts
     document.addEventListener('keydown', e => {
       const k = (e.key || '').toLowerCase();
@@ -1221,7 +1224,11 @@
       const del = st.hasKey ? el('button', { class: 'btn danger sm', onclick: async () => { if (!(await confirmBox('Remove my key', 'Stop using your own Gemini key? The department key will be used instead (if available).', 'Remove', true))) return; try { await call('deleteMyKey'); toast('Removed.', 'ok'); drawTeam(); } catch (e) { toast(e.message, 'bad'); } } }, icon('trash'), 'Remove my key') : null;
       det.appendChild(el('div', { class: 'stack', style: { marginTop: '8px' } },
         el('div', { class: 'small muted' }, '1. Open ', el('a', { href: 'https://aistudio.google.com/apikey', target: '_blank', rel: 'noopener noreferrer' }, 'aistudio.google.com/apikey'), ' and sign in.  2. Click “Create API key”.  3. Copy it and paste it here.  Your key is checked, stored only on the server, never shown again, and never shared with your team. Messages sent with your own key do not count towards the team’s daily limit.'),
-        el('div', { class: 'grid g2' }, key, model), el('div', { class: 'row' }, save, del)));
+        el('div', { class: 'grid g2' }, el('div', { class: 'row', style: { flexWrap: 'nowrap', gap: '6px' } }, key,
+          el('button', { class: 'btn sm', type: 'button', title: 'Paste key from clipboard', onclick: async () => {
+            try { const t = await navigator.clipboard.readText(); if (!t) throw new Error('empty'); key.value = t.trim(); key.focus(); toast('Key pasted.', 'ok'); }
+            catch (e) { key.focus(); toast('Press Ctrl+V (computer) or long-press the box and tap Paste (phone).', 'bad'); }
+          } }, icon('clip'), 'Paste')), model), el('div', { class: 'row' }, save, del)));
       box.appendChild(det);
     };
     box.appendChild(el('div', { class: 'small muted' }, 'Checking your key…'));

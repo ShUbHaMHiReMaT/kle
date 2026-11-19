@@ -308,6 +308,7 @@
     /* Students: no iOS/Android long-press copy/paste callout on worksheet fields (typing still works) */
     body.no-copy textarea:not([data-allowpaste]), body.no-copy input:not([data-allowpaste]) { -webkit-touch-callout: none; }
     body.no-copy .content { -webkit-touch-callout: none; }
+    body.no-copy [data-allowpaste] { -webkit-touch-callout: default; -webkit-user-select: text; user-select: text; }
     /* Timed quiz */
     .quiz-box { padding: 14px 16px; border-top: 1px solid var(--line); background: var(--surface); }
     .quiz-q { font-size: 16px; font-weight: 600; line-height: 1.45; }

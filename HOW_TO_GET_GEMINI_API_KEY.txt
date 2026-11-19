@@ -1,0 +1,111 @@
+==============================================================
+   HOW TO GET YOUR OWN FREE GEMINI API KEY
+   (and put it in the AI Mentor)
+   Very easy English - step by step
+==============================================================
+
+WHAT IS AN API KEY?
+-------------------
+An API key is like a secret password for the AI.
+With your own key, the AI Mentor uses YOUR free AI quota.
+It is FREE. You only need a Google account.
+
+!! KEEP IT SECRET !!
+Do NOT send your key on WhatsApp, email or to friends.
+Do NOT paste it in any chat. Only paste it in the AI Mentor box.
+
+
+==============================================================
+ PART 1 - MAKE THE KEY (in Google AI Studio)
+==============================================================
+
+Step 1. Open Google Chrome (on a computer or phone).
+
+Step 2. Go to this website:
+            aistudio.google.com/apikey
+
+Step 3. Log in with your Google account
+        (your college email or your Gmail is fine).
+
+Step 4. The first time, a box may ask you to agree to the terms.
+        Read it, tick the box and click "Continue" / "Accept".
+
+Step 5. Click the blue button  "Create API key".
+
+Step 6. If it asks you to choose a project:
+          - Choose any project shown, OR
+          - Click "Create API key in new project".
+
+Step 7. Wait 2-3 seconds. Your key appears.
+        It is a long line of letters and numbers.
+        Example (not real):  AIzaSyA1b2C3d4E5f6G7h8I9j0K...
+        Some new keys start with  AQ.  - that is also OK.
+
+Step 8. Click the "Copy" button next to the key.
+        Now the key is copied.
+
+   TIP: If you close the page, you can always come back to
+        aistudio.google.com/apikey and copy the key again.
+
+
+==============================================================
+ PART 2 - PUT THE KEY IN THE AI MENTOR
+==============================================================
+
+Step 1. Open the Mini Project Portfolio website and log in.
+
+Step 2. Click "AI Mentor" on the left side.
+
+Step 3. Find the box "My Gemini key".
+        Click "Add my own key (optional)".
+
+Step 4. Paste your key in the box:
+          - Computer: click in the box, press  Ctrl + V
+          - Phone:    press and hold in the box, tap "Paste"
+          - Or click the small "Paste" button next to the box.
+        (Pasting works ONLY in this box. Everywhere else
+         in the portfolio, pasting is blocked.)
+
+Step 5. Leave the "Model" box empty (or type  gemini-2.5-flash ).
+
+Step 6. Click  "Save & test".
+
+Step 7. If you see  "Your key works and is saved securely"
+        -> DONE! The badge shows  "Using my key ****1234".
+
+
+==============================================================
+ PART 3 - IF SOMETHING GOES WRONG
+==============================================================
+
+ Message                              What to do
+ -----------------------------------  -----------------------------
+ "does not look like a valid key"     You copied only part of it,
+                                      or added a space. Copy again.
+ "API key not valid"                  Wrong key. Go to AI Studio,
+                                      copy the key again.
+ "Permission denied" /                Make the key again in AI Studio
+ "API not enabled"                    (Step 5 of Part 1).
+ "quota" / "too many requests"        Your free limit for today is
+                                      used up. Try again tomorrow.
+ "Model not found"                    Type  gemini-2.5-flash  in the
+                                      Model box and save again.
+ Paste does not work                  Use the "Paste" button, or
+                                      long-press the box and tap Paste.
+
+
+==============================================================
+ PART 4 - SAFETY RULES
+==============================================================
+
+ * Your key is checked, then stored safely on the college server.
+ * Nobody (not your team, not teachers) can see your key.
+ * The website shows only the last 4 letters.
+ * To stop using it: AI Mentor -> "My Gemini key" ->
+   "Remove my key".
+ * If you think someone saw your key: go to AI Studio,
+   DELETE that key, and make a new one.
+
+==============================================================
+                           DONE!
+==============================================================

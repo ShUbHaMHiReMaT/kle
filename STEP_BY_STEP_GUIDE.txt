@@ -1,0 +1,158 @@
+==============================================================
+   EEE MINI PROJECT PORTFOLIO  -  STEP BY STEP GUIDE
+   (Very easy English)
+==============================================================
+
+WHAT IS IT?
+-----------
+It is a website.
+Students write their project work in it.
+Teachers check the work and give marks.
+An AI helper (the "AI Mentor") asks students questions.
+
+
+==============================================================
+ PART 1 - HOW TO OPEN THE WEBSITE  (everyone)
+==============================================================
+
+Step 1. Open the website link your teacher gave you.
+Step 2. Log in with your college email (....@kletech.ac.in).
+Step 3. If it asks for a code:
+          - Type your email.
+          - Click "Send sign-in code".
+          - Open your email. You will see a 6-number code.
+          - Type the code and click "Verify & sign in".
+Step 4. You are inside!
+
+   If it says "Access not yet granted":
+   your email is not added. Tell the admin.
+
+
+==============================================================
+ PART 2 - FOR STUDENTS
+==============================================================
+
+--- A. Fill your project work ---
+
+Step 1. Click "My Portfolio" on the left side.
+Step 2. You will see the steps of your project:
+           Project Profile, S1, S2, S3, S4, S5, S6, Debug Log, S7, Viva
+Step 3. Click "Project Profile" first.
+          - Write your project title.
+          - Write your project website link (if you have one).
+Step 4. Click "S1". Fill the boxes and the table.
+Step 5. Click the blue "Save" button. ALWAYS SAVE!
+Step 6. Do the same for the next steps, one by one.
+
+   REMEMBER:
+   * You CANNOT copy or paste. Type everything yourself.
+   * Some pages have a "Sign & date" button.
+     After you sign, that page gets LOCKED.
+   * S6 and S7 open only after your teacher passes Review 3.
+
+
+--- B. Upload photos and files ---
+
+Step 1. Find the box that says "Click to upload".
+Step 2. Click it and choose your photo or file.
+        (Or click "Add link" to add a Drive or GitHub link.)
+Step 3. Wait for "Uploaded".
+
+
+--- C. See your teacher's feedback ---
+
+Step 1. Click "Reviews & Feedback" on the left side.
+Step 2. Read the comments from your teacher
+        for R1, R2, R3, R4 and Final.
+
+
+--- D. Take the AI quiz (30 seconds per question) ---
+
+Step 1. First SAVE your work in a stage (for example S1).
+Step 2. Click "AI Mentor" on the left side.
+Step 3. Choose the stage (for example "S1").
+Step 4. Click "Start quiz on my S1 entries".
+Step 5. The AI asks a question about what YOUR TEAM wrote.
+Step 6. You have 30 SECONDS. Type your answer.
+        Press Enter (or click "Submit answer").
+        If time finishes, your answer is sent by itself.
+Step 7. The AI tells you:
+          - Right   -> "Correct" and why.
+          - Wrong   -> "You answered ... but ..."
+                       and "The correct way to answer is ..."
+Step 8. Click "Next question". Do all 5 questions.
+Step 9. You get a score out of 10.
+
+        9 or 10 = Excellent
+        7 or 8  = Good
+        4 to 6  = Need more work
+        0 to 3  = Need a lot of work
+
+   (Your teacher can see your answers and your score.)
+
+
+--- E. Use your own free AI key (only if needed) ---
+
+Step 1. Go to  aistudio.google.com/apikey
+Step 2. Click "Create API key". Copy it.
+Step 3. In AI Mentor, open "My Gemini key".
+Step 4. Paste the key. Click "Save & test".
+   Never share your key with anyone.
+
+
+==============================================================
+ PART 3 - FOR TEACHERS (Guides)
+==============================================================
+
+Step 1. Log in. Click "My Teams".
+Step 2. Click a team name to open its work.
+Step 3. Read each stage. Write comments under any box
+        (click "Comment").
+Step 4. Click the "Reviews & Assessment" tab.
+Step 5. For the review (R1, R2, R3, R4 or Final):
+          - Tick the boxes that are done.
+          - Choose a grade.
+          - Type marks.
+          - Choose "Cleared" or "Not cleared".
+          - Write feedback for the students.
+          - Click "Save review".
+Step 6. To see the AI quiz answers, click the "AI Mentor" tab.
+
+   Review 3 is a BIG GATE.
+   Students can go to S6 only after you choose "Cleared".
+
+
+==============================================================
+ PART 4 - FOR ADMIN / HoD / CO-ORDINATOR / REVIEWER
+==============================================================
+
+Step 1. Click "Administration" on the left side.
+Step 2. Students tab -> click
+        "Import 2026-27 class list & email IDs"
+        (this adds all teams, students and emails in one click).
+Step 3. Faculty tab -> add or edit teachers.
+        Choose the role: Faculty, Coordinator, Reviewer or HoD/Admin.
+Step 4. Teams tab -> edit team title, theme and guide.
+Step 5. To remind students, click the blue "Send reminder" button.
+        Choose the teams, write the message, click "Send reminder".
+Step 6. (HoD/Admin only) Gemini AI tab -> click "Test"
+        to check that the AI works.
+
+
+==============================================================
+ IF SOMETHING GOES WRONG
+==============================================================
+
+ Problem                        What to do
+ ----------------------------   ----------------------------------
+ Cannot log in                  Ask admin to add your email.
+ Did not get the code           Check the Spam folder. Try again.
+ "Pasting is not allowed"       That is correct. Type it yourself.
+ Cannot edit S6 or S7           Teacher must clear Review 3 first.
+ Quiz does not start            Save something in that stage first.
+ AI does not answer             Try again, or add your own AI key.
+ Page is locked                 Ask your teacher to "Unlock" it.
+
+==============================================================
+                     ALL THE BEST!
+==============================================================
