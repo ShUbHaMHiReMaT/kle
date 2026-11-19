@@ -1,0 +1,138 @@
+===========================================================
+   EEE MINI PROJECT PORTFOLIO  -  HOW IT WORKS (EASY GUIDE)
+===========================================================
+
+WHAT IS THIS?
+-------------
+This is a website for our EEE department.
+Students keep all their mini project work here.
+Teachers check the work and give marks here.
+It is like a big online notebook for every project team.
+
+
+WHO USES IT?  (3 KINDS OF PEOPLE)
+--------------------------------
+1. ADMIN (HoD / Boss)
+   - Can see EVERYTHING.
+   - Adds teachers, adds students, makes teams.
+   - Puts in the AI key.
+   - Admin emails: the owner of the Google account
+     AND shreyashalingali@gmail.com
+
+2. TEACHER (Guide)
+   - Sees only HIS or HER own teams.
+   - Reads the students' work.
+   - Writes comments and gives marks.
+   - Cannot change the students' work.
+
+3. STUDENT
+   - Sees only HIS or HER own team.
+   - Fills tables, writes answers, uploads photos and files.
+   - Can talk to the AI Mentor.
+
+
+WHERE IS EVERYTHING KEPT?
+-------------------------
+- Google Sheet  = the "memory". All writing is saved here.
+- Google Drive  = the "cupboard". All photos and files go here.
+- Gemini AI     = the "helper teacher" (AI Mentor).
+- The website   = the "door". Everyone enters through it.
+
+You do NOT need to open the Google Sheet. The website does
+everything by itself.
+
+
+THE PROJECT STEPS (LIKE CLIMBING STAIRS)
+----------------------------------------
+Every team climbs these steps one by one. No skipping!
+
+  Profile  ->  Who is in the team and what are we making?
+  S1       ->  Write what the project MUST do, with numbers.
+               (Example: "Output must stay within 1%")
+  S2       ->  Draw the block diagram (the picture of the system).
+  S3       ->  MEASURE the real parts in the lab.
+  S4       ->  Do the calculations using those measurements.
+  S5-PRE   ->  GUESS the results BEFORE switching on.
+               Everyone signs it. After signing, the guess
+               cannot be changed. (No cheating!)
+  S5-BUILD ->  Build it and test it.
+  S6       ->  Make the control loop work.
+               (This opens ONLY after the teacher passes Review 3.)
+  Debug Log->  Write every problem you faced and how you fixed it.
+  S7       ->  Check every number from S1. Pass or fail?
+  S7-VIVA  ->  Each student writes alone what he or she learned.
+
+
+SIGNING AND LOCKING
+-------------------
+Some pages have a "Sign & date" button.
+When you sign, the page gets LOCKED with the date and time.
+After that you can only fill the "measured result" boxes.
+Only a teacher can unlock it, and the teacher must write why.
+
+
+REVIEWS AND MARKS
+-----------------
+There are 5 reviews: R1, R2, R3, R4 and Final.
+The teacher ticks boxes, picks a grade and gives marks.
+Review 3 is a BIG GATE. If the team does not pass it,
+they cannot go to step S6.
+Total marks = 100.
+
+
+THE AI MENTOR
+-------------
+It is a robot helper inside the website.
+It asks the students questions to make them THINK.
+It will NOT do the homework for them.
+Teachers can read every chat and add notes.
+
+
+HOW TO START (FOR THE ADMIN)
+----------------------------
+1. Open the website link.
+2. Go to "Administration".
+3. Add teachers   (Faculty tab).
+4. Make teams     (Teams tab) - pick theme and guide.
+5. Students tab  - press "Import 2026-27 class list" to add
+                    all 17 teams and 54 students (by SRN) at once.
+                    Then add each person's email so they can log in.
+6. Gemini AI tab  - press "Test" to check the AI key works.
+Done! Now students and teachers can log in.
+
+
+HOW DO PEOPLE LOG IN?
+--------------------
+- With a college Google account: it opens by itself.
+- With normal Gmail: type your email, get a 6-number code
+  in your email, type the code, and you are in.
+- If your email is not added by the admin, you cannot enter.
+
+
+IS IT SAFE?
+-----------
+- The secret AI key is hidden on Google's server.
+  It is NEVER sent to anyone's phone or computer.
+- The website checks WHO you are before every action.
+  A student cannot see another team's work.
+- Right click, copy and "inspect" are blocked on the page.
+- Every change is written in a diary called "Audit log".
+
+
+IT WORKS ON
+-----------
+Laptop, computer, tablet and mobile phone.
+It also has a dark mode (moon button at the top).
+
+
+IF SOMETHING GOES WRONG
+-----------------------
+- Page is blank       -> check the file names: Index, App, Code, Handbook.
+- AI does not answer  -> Admin goes to Gemini AI tab and presses "Test".
+- Cannot log in       -> Ask the admin to add your email.
+- Changed the code?   -> Deploy > Manage deployments > Edit >
+                         New version > Deploy.
+
+===========================================================
+                         THE END
+===========================================================

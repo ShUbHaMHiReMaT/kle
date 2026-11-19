@@ -1,0 +1,1264 @@
+<script>
+/* ============================================================================
+ *  EEE Mini Project Portfolio — client (App.html)
+ *  No credentials, API keys or role logic live here. The client only renders
+ *  what the server returns for the signed-in user; every action is
+ *  re-authorised in Code.gs.
+ * ========================================================================== */
+(function () {
+  'use strict';
+
+  /* ==========================================================================
+   * 1. Client-side hardening (deterrents — real security is server-side)
+   * ======================================================================== */
+  const Guard = (function () {
+    const isField = t => t && (t.closest && t.closest('input, textarea, select, [contenteditable="true"]'));
+    // Right-click disabled everywhere
+    document.addEventListener('contextmenu', e => { e.preventDefault(); e.stopPropagation(); return false; }, true);
+    // Inspect / view-source / save / print shortcuts
+    document.addEventListener('keydown', e => {
+      const k = (e.key || '').toLowerCase();
+      const ctrl = e.ctrlKey || e.metaKey;
+      const block =
+        k === 'f12' ||
+        (ctrl && e.shiftKey && ['i', 'j', 'c', 'k', 'e', 'm'].indexOf(k) >= 0) ||
+        (e.metaKey && e.altKey && ['i', 'j', 'c', 'u'].indexOf(k) >= 0) ||
+        (ctrl && ['u', 's', 'p'].indexOf(k) >= 0);
+      if (block) { e.preventDefault(); e.stopPropagation(); return false; }
+    }, true);
+    // No selecting / copying / dragging of page content (form fields still work)
+    ['selectstart', 'copy', 'cut', 'dragstart'].forEach(ev => document.addEventListener(ev, e => { if (!isField(e.target)) e.preventDefault(); }, true));
+    // DevTools detection: a paused debugger statement indicates an open inspector.
+    const shield = () => document.getElementById('shield');
+    setInterval(function () {
+      const t = performance.now();
+      // eslint-disable-next-line no-debugger
+      (function () { debugger; })();
+      const open = performance.now() - t > 120;
+      const s = shield(); if (s) s.classList.toggle('on', open);
+    }, 1500);
+    // Keep the console empty
+    try { const noop = function () {}; ['log', 'info', 'warn', 'debug', 'table', 'dir'].forEach(m => { console[m] = noop; }); } catch (e) { /* ignore */ }
+    return { isField: isField };
+  })();
+
+  /* ==========================================================================
+   * 2. Utilities
+   * ======================================================================== */
+  const ICONS = {
+    home: '<path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>',
+    folder: '<path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+    users: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 20a6.5 6.5 0 0 0-2.5-5.1"/>',
+    settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
+    book: '<path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v17H6.5A2.5 2.5 0 0 0 4 21.5z"/><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>',
+    bot: '<rect x="4" y="7" width="16" height="12" rx="3"/><path d="M12 3v4M9 12h.01M15 12h.01M9 16h6"/>',
+    chart: '<path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/>',
+    logout: '<path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3"/>',
+    menu: '<path d="M3 6h18M3 12h18M3 18h18"/>',
+    upload: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>',
+    link: '<path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/>',
+    file: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/>',
+    check: '<path d="M20 6 9 17l-5-5"/>',
+    lock: '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
+    unlock: '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.8-1.2"/>',
+    plus: '<path d="M12 5v14M5 12h14"/>',
+    trash: '<path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/>',
+    edit: '<path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>',
+    send: '<path d="m22 2-7 20-4-9-9-4z"/><path d="M22 2 11 13"/>',
+    sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+    moon: '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>',
+    alert: '<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/>',
+    shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
+    x: '<path d="M18 6 6 18M6 6l12 12"/>',
+    key: '<circle cx="7.5" cy="15.5" r="4.5"/><path d="m10.7 12.3 9.8-9.8M17 6l3 3M14 9l2 2"/>',
+    refresh: '<path d="M21 12a9 9 0 1 1-2.6-6.4L21 8"/><path d="M21 3v5h-5"/>',
+    msg: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
+    star: '<path d="m12 2 3.1 6.3 6.9 1-5 4.9 1.2 6.8L12 17.8 5.8 21l1.2-6.8-5-4.9 6.9-1z"/>',
+    clip: '<path d="m21.4 11.1-9.2 9.2a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5"/>'
+  };
+  function icon(name) {
+    const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    s.setAttribute('viewBox', '0 0 24 24'); s.setAttribute('fill', 'none'); s.setAttribute('stroke', 'currentColor');
+    s.setAttribute('stroke-width', '2'); s.setAttribute('stroke-linecap', 'round'); s.setAttribute('stroke-linejoin', 'round'); s.setAttribute('aria-hidden', 'true');
+    s.innerHTML = ICONS[name] || '';
+    return s;
+  }
+  const PROPS = { value: 1, checked: 1, disabled: 1, selected: 1, readOnly: 1, multiple: 1 };
+  function el(tag, attrs) {
+    const n = document.createElement(tag);
+    if (attrs) for (const k in attrs) {
+      const v = attrs[k];
+      if (v === null || v === undefined || v === false) continue;
+      if (k === 'class') n.className = v;
+      else if (k === 'style' && typeof v === 'object') Object.assign(n.style, v);
+      else if (k.indexOf('on') === 0 && typeof v === 'function') n.addEventListener(k.slice(2), v);
+      else if (k === 'html') n.innerHTML = v;           // only ever used with escaped / trusted strings
+      else if (PROPS[k]) n[k] = v;
+      else n.setAttribute(k, v === true ? '' : v);
+    }
+    for (let i = 2; i < arguments.length; i++) add(n, arguments[i]);
+    return n;
+  }
+  function add(n, c) {
+    if (c === null || c === undefined || c === false) return;
+    if (Array.isArray(c)) { c.forEach(x => add(n, x)); return; }
+    n.appendChild(c instanceof Node ? c : document.createTextNode(String(c)));
+  }
+  function esc(s) { return String(s === null || s === undefined ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+  function clear(n) { while (n.firstChild) n.removeChild(n.firstChild); return n; }
+  function fmt(iso, withTime) {
+    if (!iso) return '';
+    const d = new Date(iso); if (isNaN(d)) return String(iso);
+    const o = { day: '2-digit', month: 'short', year: 'numeric' };
+    if (withTime !== false) { o.hour = '2-digit'; o.minute = '2-digit'; }
+    return d.toLocaleString('en-IN', o);
+  }
+  function initials(n) { return String(n || '?').split(/\s+/).filter(Boolean).slice(0, 2).map(x => x[0]).join('').toUpperCase(); }
+  function store(k, v) { try { if (v === undefined) return window.sessionStorage.getItem(k); if (v === null) window.sessionStorage.removeItem(k); else window.sessionStorage.setItem(k, v); } catch (e) { return null; } }
+  function pref(k, v) { try { if (v === undefined) return window.localStorage.getItem(k); window.localStorage.setItem(k, v); } catch (e) { return null; } }
+  function md(text) {
+    // Minimal, safe markdown: escape first, then format.
+    const lines = esc(text).split(/\r?\n/);
+    let html = '', list = null;
+    const inline = s => s.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/(^|[^*])\*(?!\s)(.+?)\*(?!\*)/g, '$1<i>$2</i>').replace(/`([^`]+)`/g, '<code>$1</code>');
+    lines.forEach(l => {
+      const ul = l.match(/^\s*[-*•]\s+(.*)$/), ol = l.match(/^\s*\d+[.)]\s+(.*)$/);
+      if (ul || ol) {
+        const t = ul ? 'ul' : 'ol';
+        if (list !== t) { if (list) html += '</' + list + '>'; html += '<' + t + '>'; list = t; }
+        html += '<li>' + inline((ul || ol)[1]) + '</li>';
+      } else {
+        if (list) { html += '</' + list + '>'; list = null; }
+        const h = l.match(/^#{1,4}\s+(.*)$/);
+        if (h) html += '<p><b>' + inline(h[1]) + '</b></p>';
+        else if (l.trim()) html += '<p>' + inline(l) + '</p>';
+      }
+    });
+    if (list) html += '</' + list + '>';
+    return html;
+  }
+  function toast(msg, type) {
+    const t = el('div', { class: 'toast ' + (type || '') }, msg);
+    document.getElementById('toasts').appendChild(t);
+    setTimeout(() => t.remove(), type === 'bad' ? 6500 : 3500);
+  }
+  function modal(o) {
+    const bg = el('div', { class: 'modal-bg', role: 'dialog', 'aria-modal': 'true' });
+    const close = () => { bg.remove(); document.removeEventListener('keydown', onKey); };
+    const onKey = e => { if (e.key === 'Escape') close(); };
+    document.addEventListener('keydown', onKey);
+    const foot = el('div', { class: 'modal-f' });
+    (o.actions || []).forEach(a => foot.appendChild(el('button', { class: 'btn ' + (a.cls || ''), onclick: () => a.fn(close) }, a.label)));
+    const box = el('div', { class: 'modal' + (o.wide ? ' wide' : '') },
+      el('div', { class: 'modal-h' }, el('h2', null, o.title), el('button', { class: 'btn ghost sm', 'aria-label': 'Close', onclick: close }, icon('x'))),
+      el('div', { class: 'modal-b' }, o.body),
+      (o.actions || []).length ? foot : null);
+    bg.appendChild(box);
+    bg.addEventListener('mousedown', e => { if (e.target === bg) close(); });
+    document.body.appendChild(bg);
+    const f = box.querySelector('input, textarea, select'); if (f) setTimeout(() => f.focus(), 50);
+    return { close: close, el: box };
+  }
+  function confirmBox(title, text, okLabel, danger) {
+    return new Promise(res => modal({ title: title, body: el('p', null, text), actions: [
+      { label: 'Cancel', fn: c => { c(); res(false); } },
+      { label: okLabel || 'Confirm', cls: danger ? 'danger' : 'primary', fn: c => { c(); res(true); } }] }));
+  }
+  function promptBox(title, label, opts) {
+    opts = opts || {};
+    return new Promise(res => {
+      const ta = opts.multiline ? el('textarea', { value: opts.value || '' }) : el('input', { type: 'text', value: opts.value || '' });
+      modal({ title: title, body: el('div', null, el('label', { class: 'f' }, label), ta, opts.hint ? el('div', { class: 'hint' }, opts.hint) : null), actions: [
+        { label: 'Cancel', fn: c => { c(); res(null); } },
+        { label: opts.ok || 'Save', cls: 'primary', fn: c => { const v = ta.value.trim(); if (opts.required && !v) { toast('This is required.', 'bad'); return; } c(); res(v); } }] });
+    });
+  }
+  function busy(btn, on, label) {
+    if (!btn) return;
+    if (on) { btn.dataset.l = btn.textContent; btn.disabled = true; btn.textContent = label || 'Working…'; }
+    else { btn.disabled = false; if (btn.dataset.l) btn.textContent = btn.dataset.l; }
+  }
+  function field(label, input, hint) { return el('div', { class: 'field' }, el('label', { class: 'f' }, label), input, hint ? el('div', { class: 'hint' }, hint) : null); }
+  function select(options, value, attrs) {
+    const s = el('select', attrs || null);
+    options.forEach(o => { const v = typeof o === 'object' ? o.v : o, l = typeof o === 'object' ? o.l : (o || '—'); s.appendChild(el('option', { value: v, selected: String(v) === String(value === undefined ? '' : value) }, l)); });
+    return s;
+  }
+  function loader(text) { return el('div', { class: 'loader' }, el('div', { class: 'spin' }), el('div', null, text || 'Loading…')); }
+  function ring(p) { const r = el('div', { class: 'ring' }, el('span', null, Math.round(p) + '%')); r.style.setProperty('--p', p); return r; }
+  function bar(p) { return el('div', { class: 'progress' }, el('i', { style: { width: Math.max(0, Math.min(100, p)) + '%' } })); }
+  function decisionBadge(d) { return d === 'Cleared' ? el('span', { class: 'badge ok dot' }, 'Cleared') : d === 'Not cleared' ? el('span', { class: 'badge bad dot' }, 'Not cleared') : d === 'In progress' ? el('span', { class: 'badge warn dot' }, 'In progress') : el('span', { class: 'badge' }, 'Pending'); }
+
+  /* ==========================================================================
+   * 3. RPC
+   * ======================================================================== */
+  let TOKEN = store('eee_tok') || '';
+  function call(action, args) {
+    return new Promise((resolve, reject) => {
+      google.script.run
+        .withSuccessHandler(raw => {
+          let o; try { o = JSON.parse(raw); } catch (e) { reject(new Error('Unexpected server response.')); return; }
+          if (o.ok) resolve(o.data);
+          else {
+            if (/^AUTH:/.test(o.error)) { TOKEN = ''; store('eee_tok', null); setTimeout(boot, 50); }
+            reject(new Error(String(o.error).replace(/^AUTH:\s*/, '')));
+          }
+        })
+        .withFailureHandler(e => reject(new Error((e && e.message) || 'Network error. Check your connection and try again.')))
+        .api({ token: TOKEN, action: action, args: args || {} });
+    });
+  }
+
+  /* ==========================================================================
+   * 4. State
+   * ======================================================================== */
+  const S = { boot: null, view: 'home', teams: null, teamId: null, team: null, stageId: null, tab: 'portfolio', admin: null, adminTab: 'faculty', dirty: {}, mentor: null, viewOwner: {} };
+  const ROLE = { admin: 'HoD / Admin', faculty: 'Faculty Guide', student: 'Student' };
+  const theme = id => (S.boot.themes || []).filter(t => t.id === id)[0];
+  const stageList = () => (S.boot.stages || []).filter(s => s.enabled).sort((a, b) => a.order - b.order);
+  const isDirty = () => Object.keys(S.dirty).length > 0;
+  async function leaveOk() { if (!isDirty()) return true; const ok = await confirmBox('Unsaved changes', 'You have unsaved changes. Leave without saving?', 'Discard changes', true); if (ok) S.dirty = {}; return ok; }
+  window.addEventListener('beforeunload', e => { if (isDirty()) { e.preventDefault(); e.returnValue = ''; } });
+
+  const root = document.getElementById('root');
+  (function applyTheme() { const t = pref('eee_theme'); if (t) document.documentElement.setAttribute('data-theme', t); })();
+
+  /* ==========================================================================
+   * 5. Boot & authentication
+   * ======================================================================== */
+  async function boot() {
+    clear(root).appendChild(loader('Loading portfolio…'));
+    try {
+      S.boot = await call('bootstrap');
+      if (S.boot.needLogin) return renderLogin();
+      if (S.boot.notRostered) return renderNotRostered();
+      document.title = S.boot.dept.shortName + ' Mini Project Portfolio';
+      S.view = S.boot.user.role === 'student' ? 'team' : 'home';
+      if (S.boot.user.role === 'student') S.teamId = S.boot.user.teamId;
+      renderShell();
+      route();
+    } catch (e) {
+      clear(root).appendChild(el('div', { class: 'content' }, el('div', { class: 'alert bad' }, icon('alert'), el('div', null, el('b', null, 'Could not load the portfolio. '), e.message)), el('p'), el('button', { class: 'btn', onclick: boot }, icon('refresh'), 'Retry')));
+    }
+  }
+
+  function logoImg(cls) { return window.KLE_LOGO ? el('div', { class: 'kle-logo ' + (cls || '') }, el('img', { src: window.KLE_LOGO, alt: 'KLE Technological University', draggable: 'false' })) : null; }
+  function authArt(dept) {
+    return el('div', { class: 'auth-art' },
+      el('div', null,
+        logoImg('auth-logo'),
+        el('div', { class: 'row' }, el('div', { class: 'logo' }, 'EEE'), el('div', null, el('div', { style: { fontWeight: 700 } }, dept.institution), el('div', { class: 'small', style: { opacity: .8 } }, dept.name))),
+        el('div', { style: { marginTop: '48px' } },
+          el('div', { class: 'small', style: { color: '#ffd66b', fontWeight: 600, letterSpacing: '.08em', textTransform: 'uppercase' } }, dept.course + ' · ' + dept.semester + ' · AY ' + dept.academicYear),
+          el('h1', { style: { marginTop: '10px' } }, 'Department Mini Project Portfolio'),
+          el('p', { style: { marginTop: '12px' } }, 'Structured around the ' + dept.cycleName + '. Every stage produces dateable, inspectable evidence — specified, measured, designed, built and validated in sequence.'),
+          el('div', { class: 'stagesline' }, ['S1 FRs', 'S2 SFD', 'S3 Plant', 'S4 Design', 'S5 Predict & Build', 'S6 Closed loop', 'S7 Validate'].map(s => el('span', null, s))))),
+      el('div', { class: 'small', style: { opacity: .7 } }, dept.cluster + ' · Handbook ' + dept.handbookVersion));
+  }
+
+  function renderLogin() {
+    const dept = S.boot.dept;
+    const email = el('input', { type: 'email', autocomplete: 'email', placeholder: 'name@institution.edu' });
+    const code = el('input', { type: 'text', inputmode: 'numeric', maxlength: '6', autocomplete: 'one-time-code', placeholder: '6-digit code' });
+    const step2 = el('div', { class: 'hidden' }, field('Sign-in code', code, 'Check your inbox. The code expires in 10 minutes.'));
+    const msg = el('div');
+    const btn = el('button', { class: 'btn primary', style: { width: '100%', justifyContent: 'center' } }, 'Send sign-in code');
+    let sent = false;
+    btn.onclick = async () => {
+      msg.textContent = '';
+      try {
+        if (!sent) {
+          busy(btn, true, 'Sending…');
+          await call('requestOtp', { email: email.value.trim() });
+          sent = true; step2.classList.remove('hidden'); email.disabled = true; btn.dataset.l = 'Verify & sign in';
+          add(msg, el('div', { class: 'alert ok' }, icon('check'), el('div', null, 'If this email is registered, a code has been sent.')));
+          busy(btn, false); code.focus();
+        } else {
+          busy(btn, true, 'Verifying…');
+          const r = await call('verifyOtp', { email: email.value.trim(), code: code.value.trim() });
+          TOKEN = r.token; store('eee_tok', TOKEN); boot();
+        }
+      } catch (e) { busy(btn, false); clear(msg).appendChild(el('div', { class: 'alert bad' }, icon('alert'), el('div', null, e.message))); }
+    };
+    [email, code].forEach(i => i.addEventListener('keydown', e => { if (e.key === 'Enter') btn.click(); }));
+    clear(root).appendChild(el('div', { class: 'auth' }, authArt(dept),
+      el('div', { class: 'auth-form' }, el('div', { class: 'auth-card' },
+        el('h2', null, 'Sign in'),
+        el('p', { class: 'muted', style: { margin: '6px 0 22px' } }, 'Use the email address registered by your department.'),
+        S.boot.otp === false ? el('div', { class: 'alert warn' }, icon('alert'), el('div', null, 'Please open this portal while signed in to your institutional Google account.')) :
+        el('div', null, field('Email address', email), step2, btn, el('div', { style: { marginTop: '14px' } }, msg)),
+        el('div', { class: 'hint', style: { marginTop: '28px' } }, el('span', { class: 'row' }, icon('shield'), ' Secured sign-in. Access is limited to registered faculty and students.'))))));
+    email.focus();
+  }
+
+  function renderNotRostered() {
+    clear(root).appendChild(el('div', { class: 'auth' }, authArt(S.boot.dept), el('div', { class: 'auth-form' }, el('div', { class: 'auth-card' },
+      el('h2', null, 'Access not yet granted'),
+      el('p', { class: 'muted', style: { marginTop: '8px' } }, 'You are signed in as ', el('b', null, S.boot.email), ', which is not registered in the department portfolio.'),
+      el('p', { class: 'muted' }, 'Ask the HoD / portfolio administrator to add you as faculty or student.'),
+      TOKEN ? el('button', { class: 'btn', onclick: logout }, icon('logout'), 'Use a different account') : null))));
+  }
+
+  async function logout() {
+    if (!(await leaveOk())) return;
+    try { await call('logout'); } catch (e) { /* ignore */ }
+    TOKEN = ''; store('eee_tok', null); boot();
+  }
+
+  /* ==========================================================================
+   * 6. Shell
+   * ======================================================================== */
+  let contentEl, titleEl, navEl, appEl;
+  function navItems() {
+    const r = S.boot.user.role;
+    if (r === 'admin') return [['h', 'Department'], ['home', 'chart', 'Dashboard'], ['teams', 'folder', 'Team Portfolios'], ['h', 'Manage'], ['admin', 'settings', 'Administration'], ['h', 'Reference'], ['handbook', 'book', 'Handbook']];
+    if (r === 'faculty') return [['h', 'Guide'], ['home', 'chart', 'My Teams'], ['h', 'Reference'], ['handbook', 'book', 'Handbook']];
+    return [['h', 'My Project'], ['team', 'folder', 'My Portfolio'], ['mentor', 'bot', 'AI Mentor'], ['reviews', 'star', 'Reviews & Feedback'], ['h', 'Reference'], ['handbook', 'book', 'Handbook']];
+  }
+  function renderShell() {
+    const u = S.boot.user, d = S.boot.dept;
+    navEl = el('nav', { class: 'nav', 'aria-label': 'Main' });
+    titleEl = el('div', { class: 'title' });
+    contentEl = el('main', { class: 'content', id: 'content' });
+    const dark = () => document.documentElement.getAttribute('data-theme') === 'dark' || (!document.documentElement.getAttribute('data-theme') && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    const themeBtn = el('button', { class: 'btn ghost sm', 'aria-label': 'Toggle theme', title: 'Toggle light/dark' }, icon(dark() ? 'sun' : 'moon'));
+    themeBtn.onclick = () => { const t = dark() ? 'light' : 'dark'; document.documentElement.setAttribute('data-theme', t); pref('eee_theme', t); clear(themeBtn).appendChild(icon(dark() ? 'sun' : 'moon')); };
+    appEl = el('div', { class: 'app' },
+      el('aside', { class: 'sidebar' },
+        el('div', { class: 'brand' + (window.KLE_LOGO ? ' with-logo' : '') }, logoImg(),
+          el('div', { class: 'row', style: { flexWrap: 'nowrap' } }, el('div', { class: 'logo' }, d.shortName), el('div', null, el('div', { class: 'brand-t' }, d.name), el('div', { class: 'brand-s' }, d.institution)))),
+        navEl,
+        el('div', { class: 'side-foot' }, el('b', null, d.course), el('div', null, d.semester + ' · AY ' + d.academicYear), el('div', { class: 'tiny', style: { marginTop: '6px', opacity: .8 } }, 'Signed in as ' + ROLE[u.role] + ' · v' + S.boot.version))),
+      el('div', { class: 'scrim', onclick: () => appEl.classList.remove('nav-open') }),
+      el('div', { class: 'main' },
+        el('header', { class: 'topbar' },
+          el('button', { class: 'btn ghost sm menu-btn', 'aria-label': 'Open menu', onclick: () => appEl.classList.add('nav-open') }, icon('menu')),
+          titleEl, el('div', { class: 'spacer' }), themeBtn,
+          el('div', { class: 'user-chip' }, el('div', { class: 'avatar' }, initials(u.name)), el('div', { class: 'user-meta' }, el('b', null, u.name || u.email), el('span', { class: 'tiny muted' }, ROLE[u.role]))),
+          el('button', { class: 'btn ghost sm', title: 'Sign out', 'aria-label': 'Sign out', onclick: logout }, icon('logout'))),
+        contentEl,
+        el('footer', { class: 'app-foot' }, el('span', null, '© ' + new Date().getFullYear() + ' ' + d.institution + ' · ' + d.name), el('span', null, d.cycleName + ' · Handbook ' + d.handbookVersion))));
+    clear(root).appendChild(appEl);
+  }
+  function renderNav() {
+    clear(navEl);
+    navItems().forEach(it => {
+      if (it[0] === 'h') { navEl.appendChild(el('div', { class: 'nav-h' }, it[1])); return; }
+      const r = S.boot.user.role;
+      const active = (r === 'student' && S.view === 'team') ? (it[0] === (S.tab === 'mentor' || S.tab === 'reviews' ? S.tab : 'team')) : S.view === it[0] || (it[0] === 'teams' && S.view === 'team' && S.boot.user.role === 'admin') || (it[0] === 'home' && S.view === 'team' && S.boot.user.role === 'faculty');
+      navEl.appendChild(el('button', { class: active ? 'active' : '', onclick: () => go(it[0]) }, icon(it[1]), it[2]));
+    });
+  }
+  async function go(view, extra) {
+    if (!(await leaveOk())) return;
+    appEl.classList.remove('nav-open');
+    S.view = view;
+    if (S.boot.user.role === 'student' && (view === 'mentor' || view === 'reviews')) { S.view = 'team'; S.tab = view; }
+    else if (view === 'team' && S.boot.user.role === 'student' && !extra) S.tab = 'portfolio';
+    Object.assign(S, extra || {});
+    route();
+  }
+  function route() {
+    renderNav();
+    window.scrollTo(0, 0);
+    const v = S.view;
+    if (v === 'home') return viewDashboard();
+    if (v === 'teams') return viewDashboard(true);
+    if (v === 'team') return viewTeam();
+    if (v === 'admin') return viewAdmin();
+    if (v === 'handbook') return viewHandbook();
+  }
+  function setTitle(t, sub) {
+    const d = S.boot.dept;
+    clear(titleEl).appendChild(el('span', { class: 't1' }, t));
+    titleEl.appendChild(el('span', { class: 't2' }, sub || (d.shortName + ' · ' + d.course + ' · ' + d.semester + ' · AY ' + d.academicYear)));
+  }
+
+  /* ==========================================================================
+   * 7. Dashboard (admin / faculty)
+   * ======================================================================== */
+  async function viewDashboard(listOnly) {
+    const u = S.boot.user;
+    setTitle(u.role === 'admin' ? (listOnly ? 'Team Portfolios' : 'Department Dashboard') : 'My Teams');
+    clear(contentEl).appendChild(loader('Loading teams…'));
+    try { S.teams = await call('teamList'); } catch (e) { clear(contentEl).appendChild(el('div', { class: 'alert bad' }, icon('alert'), e.message)); return; }
+    const teams = S.teams, stages = stageList(), reviews = S.boot.reviews;
+    const overall = t => { const ps = stages.map(s => (t.progress[s.id] || {}).pct || 0); return ps.length ? ps.reduce((a, b) => a + b, 0) / ps.length : 0; };
+    const c = clear(contentEl);
+    if (!listOnly) {
+      c.appendChild(el('div', { class: 'hero' }, el('div', { class: 'kicker' }, S.boot.dept.course + ' · ' + S.boot.dept.semester + ' · AY ' + S.boot.dept.academicYear),
+        el('h1', { style: { marginTop: '6px' } }, S.boot.dept.name), el('p', null, S.boot.dept.institution + ' — ' + S.boot.dept.cycleName + '. ' + (u.role === 'admin' ? 'Department-wide view of every team portfolio.' : 'Teams assigned to you as guide, co-guide or reviewer.'))));
+      const students = teams.reduce((a, t) => a + t.members.length, 0);
+      const r3 = teams.filter(t => (t.reviews.R3 || {}).decision === 'Cleared').length;
+      const flagged = teams.filter(t => t.flags.length).length;
+      const avg = teams.length ? teams.reduce((a, t) => a + overall(t), 0) / teams.length : 0;
+      c.appendChild(el('div', { class: 'grid g4', style: { margin: '18px 0' } },
+        [['Project teams', teams.length, 'folder', ''], ['Students', students, 'users', ''], ['Cleared Review 3 (hard gate)', r3 + ' / ' + teams.length, 'shield', 'ok'], ['Average progress', Math.round(avg) + '%', 'chart', 'red']].map(x => el('div', { class: 'card stat lift ' + x[3] }, el('div', { class: 'si' }, icon(x[2])), el('div', null, el('div', { class: 'v' }, x[1]), el('div', { class: 'l' }, x[0]))))));
+      if (flagged) c.appendChild(el('div', { class: 'alert warn', style: { marginBottom: '16px' } }, icon('alert'), el('div', null, el('b', null, flagged + ' team(s) have integrity flags'), ' — e.g. predictions signed after first power-on, or S4 started before S3 (Handbook 7.5 / 7.7).')));
+    }
+    const q = el('input', { type: 'text', placeholder: 'Search team, member, guide, artefact…', style: { maxWidth: '320px' } });
+    const th = select([{ v: '', l: 'All themes' }].concat(S.boot.themes.map(t => ({ v: t.id, l: t.id + ' · ' + t.name }))), '', { style: { maxWidth: '260px' } });
+    const body = el('tbody');
+    const draw = () => {
+      clear(body);
+      const s = q.value.toLowerCase();
+      const list = teams.filter(t => (!th.value || t.themeId === th.value) && (!s || [t.name, t.title, t.artefact, t.guide, t.coGuide].concat(t.members).join(' ').toLowerCase().indexOf(s) >= 0));
+      if (!list.length) body.appendChild(el('tr', null, el('td', { colspan: 5 + reviews.length, class: 'muted', style: { textAlign: 'center', padding: '28px' } }, teams.length ? 'No teams match.' : (u.role === 'admin' ? 'No teams yet — create them in Administration → Teams.' : 'No teams are assigned to you yet.'))));
+      list.forEach(t => {
+        const th_ = theme(t.themeId) || {};
+        body.appendChild(el('tr', { style: { cursor: 'pointer' }, onclick: () => go('team', { teamId: t.id, tab: 'portfolio', stageId: null }) },
+          el('td', null, el('div', { class: 'row', style: { gap: '8px' } }, el('b', null, t.name), t.status === 'Archived' ? el('span', { class: 'badge' }, 'Archived') : null),
+            t.title ? el('div', { class: 'team-title' }, t.title) : el('div', { class: 'tiny muted' }, 'Title not set'),
+            el('div', { class: 'row', style: { gap: '8px', marginTop: '6px' } }, el('div', { class: 'avs' }, t.members.slice(0, 4).map(m => el('div', { class: 'avatar', title: m }, initials(m)))), el('span', { class: 'tiny muted' }, t.members.length + ' members'))),
+          el('td', null, t.themeId ? [el('span', { class: 'badge brand' }, t.themeId), ' ', el('span', { class: 'small' }, th_.name || '')] : el('span', { class: 'badge warn' }, 'Theme not set'), el('div', { class: 'tiny muted' }, t.artefact || '')),
+          el('td', { class: 'small' }, t.guide || el('span', { class: 'muted' }, 'Unassigned')),
+          el('td', { style: { minWidth: '130px' } }, el('div', { class: 'small', style: { fontWeight: 600 } }, Math.round(overall(t)) + '%'), bar(overall(t))),
+          reviews.map(r => el('td', null, decisionBadge((t.reviews[r.id] || {}).decision))),
+          el('td', { class: 'small' }, el('span', { class: 'badge ' + (t.debugCycles >= 3 ? 'ok' : t.debugCycles ? 'warn' : '') }, t.debugCycles + ' cycles'), t.flags.length ? el('div', { style: { marginTop: '4px' } }, el('span', { class: 'badge bad', title: t.flags.join('\n') }, '⚑ ' + t.flags.length)) : null)));
+      });
+    };
+    q.oninput = draw; th.onchange = draw;
+    c.appendChild(el('div', { class: 'card' },
+      el('div', { class: 'card-h' }, el('h2', { style: { flex: 1 } }, 'Team portfolios'), q, th),
+      el('div', { class: 'tbl-wrap', style: { border: 0, borderRadius: 0 } }, el('table', { class: 't' },
+        el('thead', null, el('tr', null, el('th', null, 'Team'), el('th', null, 'Theme / Artefact'), el('th', null, 'Guide'), el('th', null, 'Progress'), reviews.map(r => el('th', { title: r.name }, r.id === 'FINAL' ? 'Final' : r.id)), el('th', null, 'Debug log'))),
+        body))));
+    draw();
+  }
+
+  /* ==========================================================================
+   * 8. Team portfolio
+   * ======================================================================== */
+  async function loadTeam() { S.team = await call('getTeam', { teamId: S.teamId }); return S.team; }
+
+  async function viewTeam() {
+    setTitle('Portfolio');
+    if (!S.teamId) {
+      clear(contentEl).appendChild(el('div', { class: 'card card-b' }, el('h2', null, 'No team assigned yet'), el('p', { class: 'muted', style: { marginTop: '8px' } }, 'Your guide or the HoD will assign you to a project team. Meanwhile, explore the Handbook.'), el('button', { class: 'btn', onclick: () => go('handbook') }, icon('book'), 'Open Handbook')));
+      return;
+    }
+    clear(contentEl).appendChild(loader('Loading portfolio…'));
+    try { await loadTeam(); } catch (e) { clear(contentEl).appendChild(el('div', { class: 'alert bad' }, icon('alert'), e.message)); return; }
+    drawTeam();
+  }
+
+  function overallPct() { const st = stageList(); const p = S.team.progress; return st.length ? st.reduce((a, s) => a + ((p[s.id] || {}).pct || 0), 0) / st.length : 0; }
+
+  function drawTeam() {
+    const T = S.team, th = theme(T.team.themeId) || {};
+    setTitle(T.team.name, T.team.title || undefined);
+    const c = clear(contentEl);
+    c.appendChild(el('div', { class: 'card', style: { marginBottom: '18px' } }, el('div', { class: 'card-b' },
+      el('div', { class: 'row', style: { alignItems: 'flex-start', gap: '16px' } },
+        ring(overallPct()),
+        el('div', { style: { flex: 1, minWidth: '220px' } },
+          el('div', { class: 'row' }, el('h1', null, T.team.name), (th.id ? el('span', { class: 'badge brand' }, th.id + ' · ' + th.name) : el('span', { class: 'badge warn' }, 'Theme not set yet')), T.team.status === 'Archived' ? el('span', { class: 'badge' }, 'Archived') : null),
+          T.team.title ? el('div', { class: 'team-title', style: { fontSize: '15px', fontWeight: 600, maxWidth: 'none', marginTop: '6px' } }, T.team.title) : el('div', { class: 'small muted', style: { marginTop: '4px' } }, 'Project title not set yet'),
+          el('div', { class: 'small muted', style: { marginTop: '2px' } }, T.team.artefact ? 'Artefact: ' + T.team.artefact : 'Artefact not selected yet'),
+          el('div', { class: 'small muted', style: { marginTop: '6px' } }, 'Guide: ', el('b', null, T.guide ? T.guide.name : '—'), T.coGuide ? ' · Co-guide: ' + T.coGuide.name : '', ' · Members: ', T.members.map(m => m.name).join(', ') || '—')),
+        el('div', { class: 'row' }, el('span', { class: 'badge ' + (T.debugCycles >= 3 ? 'ok' : T.debugCycles ? 'warn' : '') }, 'Debug cycles: ' + T.debugCycles), T.flags.length ? el('span', { class: 'badge bad' }, '⚑ ' + T.flags.length + ' integrity flag(s)') : null)),
+      T.flags.length && S.boot.user.role !== 'student' ? el('div', { class: 'alert bad', style: { marginTop: '12px' } }, icon('alert'), el('div', null, T.flags.map(f => el('div', null, f)))) : null)));
+
+    const tabs = [['portfolio', 'Portfolio'], ['reviews', S.boot.user.role === 'student' ? 'Reviews & Feedback' : 'Reviews & Assessment'], ['mentor', 'AI Mentor'], ['info', 'Team & Evidence']];
+    c.appendChild(el('div', { class: 'tabs', role: 'tablist' }, tabs.map(t => el('button', { class: S.tab === t[0] ? 'active' : '', role: 'tab', onclick: async () => { if (!(await leaveOk())) return; S.tab = t[0]; drawTeam(); } }, t[1]))));
+    const pane = el('div');
+    c.appendChild(pane);
+    if (S.tab === 'portfolio') drawPortfolio(pane);
+    else if (S.tab === 'reviews') drawReviews(pane);
+    else if (S.tab === 'mentor') drawMentor(pane);
+    else drawInfo(pane);
+  }
+
+  /* ---------- Portfolio: stage navigator + stage content ---------- */
+  function drawPortfolio(pane) {
+    const stages = stageList();
+    if (!S.stageId || !stages.some(s => s.id === S.stageId)) S.stageId = (stages[0] || {}).id;
+    const nav = el('div', { class: 'card-b', style: { padding: 0 } });
+    stages.forEach(s => {
+      const p = (S.team.progress[s.id] || {}).pct || 0;
+      const gated = s.gate && S.boot.settings.enforceGates && S.team.gates[s.gate] !== 'Cleared';
+      nav.appendChild(el('button', { class: 'stage-btn' + (S.stageId === s.id ? ' active' : ''), onclick: async () => { if (!(await leaveOk())) return; S.stageId = s.id; drawTeam(); } },
+        el('div', { class: 'stage-code' }, s.code),
+        el('div', { style: { flex: 1, minWidth: 0 } }, el('div', { class: 'stage-name' }, s.title),
+          el('div', { class: 'stage-meta' }, gated ? icon('lock') : null, bar(p), el('span', null, p + '%')))));
+    });
+    const main = el('div');
+    pane.appendChild(el('div', { class: 'port' }, el('div', { class: 'card stages' }, el('div', { class: 'card-h' }, el('h3', null, S.boot.dept.cycleName)), nav), main));
+    drawStage(main, stages.filter(s => s.id === S.stageId)[0]);
+  }
+
+  function canEditStage(stage) {
+    const T = S.team, u = S.boot.user;
+    if (!T.canEdit || T.team.status === 'Archived') return false;
+    if (u.role === 'admin') return true;
+    if (stage.gate && S.boot.settings.enforceGates && T.gates[stage.gate] !== 'Cleared') return false;
+    return true;
+  }
+
+  function drawStage(main, stage) {
+    if (!stage) { main.appendChild(el('div', { class: 'card card-b muted' }, 'No stages are enabled.')); return; }
+    const rv = S.boot.reviews.filter(r => r.id === stage.review)[0];
+    const rub = S.boot.rubric.filter(r => r.id === stage.rubric)[0];
+    main.appendChild(el('div', { class: 'card', style: { marginBottom: '18px' } }, el('div', { class: 'card-b' },
+      el('div', { class: 'row' }, el('span', { class: 'badge brand mono' }, stage.code), el('h2', { style: { flex: 1 } }, stage.title)),
+      el('div', { class: 'row small muted', style: { margin: '8px 0 10px' } },
+        el('span', null, '⏱ ', stage.due || '—'), rv ? el('span', null, '· ', rv.name) : null, rub ? el('span', null, '· Rubric: ' + rub.name + ' (' + rub.marks + ')') : null),
+      el('p', { style: { margin: 0 } }, stage.purpose))));
+    if (stage.gate && S.team.gates[stage.gate] !== 'Cleared' && S.boot.settings.enforceGates) {
+      const g = S.boot.reviews.filter(r => r.id === stage.gate)[0];
+      main.appendChild(el('div', { class: 'alert warn', style: { marginBottom: '18px' } }, icon('lock'), el('div', null, el('b', null, 'Hard gate: '), (g ? g.name : stage.gate) + ' must be cleared by your guide before this stage can be recorded. ', S.boot.user.role === 'admin' ? '(Admins can still edit.)' : '')));
+    }
+    (stage.sections || []).forEach(sec => main.appendChild(drawSection(stage, sec)));
+  }
+
+  /* ---------- Section rendering ---------- */
+  function recKey(sec, owner) { return sec.individual ? sec.id + '|' + owner : sec.id; }
+  function ownerFor(sec) {
+    const u = S.boot.user;
+    if (!sec.individual) return '';
+    if (u.role === 'student') return u.email.toLowerCase();
+    return S.viewOwner[sec.id] || ((S.team.members.filter(m => m.email)[0] || {}).email || '');
+  }
+  function minRows(sec) { const th = theme(S.team.team.themeId); return sec.minRows === 'theme:minFR' ? (th ? th.minFR : 5) : Number(sec.minRows || 0); }
+
+  function initialRows(sec) {
+    const th = theme(S.team.team.themeId) || {};
+    const first = (sec.columns[0] || {}).id;
+    let rows = [];
+    if (Array.isArray(sec.rowsFrom)) rows = sec.rowsFrom.map(v => ({ [first]: v }));
+    else if (sec.rowsFrom === 'theme:sfdBlocks') rows = (th.sfdBlocks || []).map(b => ({ [first]: b }));
+    else if (sec.rowsFrom === 'theme:s3Params') rows = (th.s3Params || []).map(p => ({ param: p.p, method: p.m, feeds: p.f }));
+    else if (sec.rowsFrom === 'S1.fr') {
+      const r = S.team.records['S1-B'];
+      rows = r && r.data ? (r.data.rows || []).filter(x => x.statement || x.target).map(x => ({ fr: x.no, statement: x.statement, target: x.target })) : [];
+    }
+    const need = Math.max(minRows(sec), rows.length ? 0 : 1);
+    while (rows.length < need) rows.push({});
+    return rows;
+  }
+
+  function drawSection(stage, sec) {
+    const T = S.team, u = S.boot.user;
+    const card = el('section', { class: 'card sec', id: 'sec-' + sec.id });
+    const head = el('div', { class: 'sec-h' }, el('h3', null, sec.title));
+    if (sec.individual) head.appendChild(el('span', { class: 'badge warn' }, 'Individual'));
+    if (sec.lock) head.appendChild(el('span', { class: 'badge' }, icon('lock'), ' Sign-off'));
+    card.appendChild(head);
+    const body = el('div', { class: 'card-b' });
+    card.appendChild(body);
+    if (sec.desc) body.appendChild(el('p', { class: 'small muted' }, sec.desc));
+
+    if (sec.type === 'info') { body.appendChild(renderInfo(sec.info)); return card; }
+    if (sec.type === 'evidence') { body.appendChild(renderEvidence(stage, sec, canEditStage(stage))); card.appendChild(renderComments(stage, sec)); return card; }
+
+    // Individual sections: faculty/admin choose which member to view
+    if (sec.individual && u.role !== 'student') {
+      const s = select(T.members.filter(m => m.email).map(m => ({ v: m.email, l: m.name + (m.usn ? ' (' + m.usn + ')' : '') })), ownerFor(sec));
+      s.onchange = () => { S.viewOwner[sec.id] = s.value; card.replaceWith(drawSection(stage, sec)); };
+      head.appendChild(el('div', { style: { minWidth: '200px' } }, s));
+      if (!T.members.length) { body.appendChild(el('p', { class: 'muted' }, 'No members in this team.')); return card; }
+    }
+    const owner = ownerFor(sec);
+    const key = recKey(sec, owner);
+    const rec = T.records[key];
+    const locked = !!(rec && rec.lockedAt);
+    const editable = canEditStage(stage) && (!sec.individual || u.role === 'student' || u.role === 'admin');
+    const draft = rec && rec.data ? JSON.parse(JSON.stringify(rec.data)) : (sec.type === 'table' ? { rows: initialRows(sec) } : { values: {} });
+    const markDirty = () => { S.dirty[key] = true; status.textContent = 'Unsaved changes'; status.className = 'small'; status.style.color = 'var(--warn)'; };
+
+    if (sec.type === 'table') body.appendChild(renderTable(sec, draft, editable, locked, markDirty));
+    else body.appendChild(renderFields(sec, draft, editable, locked, markDirty));
+
+    // Footer: status, save, sign-off
+    const status = el('span', { class: 'small muted' }, rec ? ('Saved v' + rec.version + ' · ' + fmt(rec.updatedAt) + ' · first recorded ' + fmt(rec.createdAt, false)) : 'Not saved yet');
+    const foot = el('div', { class: 'sec-foot' }, status, el('div', { class: 'spacer', style: { flex: 1 } }));
+    const hasPost = sec.type === 'table' ? sec.columns.some(c => c.post) : (sec.fields || []).some(f => f.post);
+    if (editable && (!locked || hasPost)) {
+      const save = el('button', { class: 'btn primary' }, icon('check'), locked ? 'Save measured results' : 'Save');
+      save.onclick = async () => {
+        busy(save, true, 'Saving…');
+        try {
+          const r = await call('saveRecord', { teamId: T.team.id, stageId: stage.id, sectionId: sec.id, data: draft, version: rec ? rec.version : 0, owner: owner });
+          T.records[key] = Object.assign({}, rec || { createdAt: r.updatedAt, signatures: [], sectionId: sec.id, owner: owner }, { data: r.data, version: r.version, updatedAt: r.updatedAt, updatedBy: u.email });
+          delete S.dirty[key];
+          toast('Saved.', 'ok');
+          card.replaceWith(drawSection(stage, sec));
+          refreshProgress();
+        } catch (e) { busy(save, false); toast(e.message, 'bad'); }
+      };
+      foot.appendChild(save);
+    }
+    if (sec.lock && !sec.individual) foot.appendChild(renderLock(stage, sec, rec, editable));
+    card.appendChild(foot);
+    card.appendChild(renderComments(stage, sec));
+    return card;
+  }
+
+  async function refreshProgress() {
+    try { const t = await call('getTeam', { teamId: S.teamId }); S.team.progress = t.progress; S.team.debugCycles = t.debugCycles; S.team.flags = t.flags;
+      document.querySelectorAll('.stage-btn').forEach((b, i) => { const s = stageList()[i]; if (!s) return; const p = (t.progress[s.id] || {}).pct || 0; const m = b.querySelector('.stage-meta'); if (m) { const bi = m.querySelector('.progress > i'); if (bi) bi.style.width = p + '%'; const sp = m.querySelector('span'); if (sp) sp.textContent = p + '%'; } });
+      const r = contentEl.querySelector('.ring'); if (r) { r.style.setProperty('--p', overallPct()); r.querySelector('span').textContent = Math.round(overallPct()) + '%'; }
+    } catch (e) { /* non-critical */ }
+  }
+
+  function renderLock(stage, sec, rec, editable) {
+    const T = S.team, u = S.boot.user;
+    const wrap = el('div', { class: 'row' });
+    const sigs = (rec && rec.signatures) || [];
+    sigs.forEach(s => wrap.appendChild(el('span', { class: 'sig', title: s.email }, icon('check'), s.name + ' · ' + fmt(s.at))));
+    if (rec && rec.lockedAt) wrap.appendChild(el('span', { class: 'badge ok' }, icon('lock'), ' Locked ' + fmt(rec.lockedAt)));
+    else if (sec.lock.allMembers && sigs.length) wrap.appendChild(el('span', { class: 'badge warn' }, sigs.length + ' / ' + T.members.length + ' signed'));
+    const mine = sigs.some(s => s.email === u.email);
+    if (editable && u.role === 'student' && !mine && rec) {
+      const b = el('button', { class: 'btn' }, icon('edit'), sec.lock.label || 'Sign & date');
+      b.onclick = async () => {
+        if (S.dirty[recKey(sec, '')]) { toast('Save your changes before signing.', 'bad'); return; }
+        const ok = await confirmBox('Sign & date this section', 'Your name and the current timestamp will be recorded. ' + (sec.lock.allMembers ? 'The section locks once every member has signed. ' : 'The section locks now. ') + 'After locking, only measured-result columns can be filled in. Signing after the event it predicts is treated as a falsified record (Handbook 7.7).', 'Sign now');
+        if (!ok) return;
+        busy(b, true, 'Signing…');
+        try { const r = await call('signSection', { teamId: T.team.id, stageId: stage.id, sectionId: sec.id }); rec.signatures = r.signatures; rec.lockedAt = r.lockedAt; toast('Signed.', 'ok'); document.getElementById('sec-' + sec.id).replaceWith(drawSection(stage, sec)); }
+        catch (e) { busy(b, false); toast(e.message, 'bad'); }
+      };
+      wrap.appendChild(b);
+    }
+    if ((u.role === 'faculty' || u.role === 'admin') && rec && (rec.lockedAt || sigs.length)) {
+      const b = el('button', { class: 'btn danger sm' }, icon('unlock'), 'Unlock');
+      b.onclick = async () => {
+        const reason = await promptBox('Unlock signed section', 'Documented reason (visible to the team, kept in the audit log)', { multiline: true, required: true, ok: 'Unlock' });
+        if (!reason) return;
+        try { await call('unlockSection', { teamId: T.team.id, stageId: stage.id, sectionId: sec.id, reason: reason }); await loadTeam(); toast('Unlocked.', 'ok'); drawTeam(); }
+        catch (e) { toast(e.message, 'bad'); }
+      };
+      wrap.appendChild(b);
+    }
+    return wrap;
+  }
+
+  function cellInput(col, value, disabled, onChange) {
+    let i;
+    if (col.type === 'select') i = select(col.options || [''], value, { disabled: disabled });
+    else if (col.type === 'textarea') i = el('textarea', { value: value || '', disabled: disabled, rows: 2, placeholder: col.hint || '' });
+    else i = el('input', { type: col.type === 'date' ? 'date' : col.type === 'number' ? 'number' : 'text', value: value || '', disabled: disabled, placeholder: col.hint || '' });
+    i.addEventListener(col.type === 'select' ? 'change' : 'input', () => onChange(i.value));
+    i.setAttribute('aria-label', col.label);
+    return i;
+  }
+
+  function renderTable(sec, draft, editable, locked, markDirty) {
+    const wrap = el('div');
+    const cols = sec.columns;
+    const draw = () => {
+      clear(wrap);
+      const rowsEditable = editable && !locked;
+      const tbody = el('tbody');
+      draft.rows.forEach((r, i) => {
+        const tr = el('tr', null, el('td', { class: 'idx' }, i + 1));
+        cols.forEach(c => {
+          const dis = !editable || (locked && !c.post);
+          tr.appendChild(el('td', { style: c.width ? { minWidth: c.width + 'px', width: c.width + 'px' } : null }, cellInput(c, r[c.id], dis, v => { r[c.id] = v; markDirty(); })));
+        });
+        if (rowsEditable) tr.appendChild(el('td', { class: 'act' }, el('button', { class: 'btn ghost sm', title: 'Remove row', 'aria-label': 'Remove row', onclick: () => { draft.rows.splice(i, 1); markDirty(); draw(); } }, icon('trash'))));
+        tbody.appendChild(tr);
+      });
+      wrap.appendChild(el('div', { class: 'tbl-wrap' }, el('table', { class: 't edit' },
+        el('thead', null, el('tr', null, el('th', null, '#'), cols.map(c => el('th', { title: c.hint || '' }, c.label, c.post ? el('span', { class: 'post', title: 'Editable after sign-off (measured result)' }, ' ●') : null)), rowsEditable ? el('th') : null)),
+        tbody)));
+      const n = draft.rows.filter(r => cols.slice(1).some(c => String(r[c.id] || '').trim())).length;
+      const mr = minRows(sec);
+      wrap.appendChild(el('div', { class: 'row', style: { marginTop: '10px' } },
+        rowsEditable ? el('button', { class: 'btn sm', onclick: () => { draft.rows.push({}); markDirty(); draw(); } }, icon('plus'), 'Add row') : null,
+        mr ? el('span', { class: 'badge ' + (n >= mr ? 'ok' : 'warn') }, n + ' / ' + mr + ' minimum rows completed') : el('span', { class: 'small muted' }, n + ' row(s) completed'),
+        cols.some(c => c.post) ? el('span', { class: 'tiny muted' }, '● = measured-result column (fill after the test; stays editable after sign-off)') : null));
+    };
+    draw();
+    return wrap;
+  }
+
+  function renderFields(sec, draft, editable, locked, markDirty) {
+    const wrap = el('div');
+    draft.values = draft.values || {};
+    (sec.fields || []).forEach(f => {
+      if (f.type === 'info') { wrap.appendChild(el('div', { class: 'field' }, el('label', { class: 'f' }, f.label), renderInfo(f.info))); return; }
+      const dis = !editable || (locked && !f.post);
+      const i = cellInput(f, draft.values[f.id], dis, v => { draft.values[f.id] = v; markDirty(); if (counter) counter.textContent = sentences(v); });
+      if (f.type === 'textarea') i.rows = 4;
+      let counter = null;
+      if (sec.minSentences && f.type === 'textarea') counter = el('span', null, sentences(draft.values[f.id]));
+      wrap.appendChild(el('div', { class: 'field' }, el('label', { class: 'f' }, f.label), i, f.hint ? el('div', { class: 'hint' }, f.hint) : null,
+        counter ? el('div', { class: 'hint' }, counter, ' · minimum ' + sec.minSentences + ' sentences, in your own words') : null));
+    });
+    function sentences(t) { const n = String(t || '').split(/[.!?]+(\s|$)/).filter(s => s && s.trim().length > 3).length; return n + ' sentence' + (n === 1 ? '' : 's'); }
+    return wrap;
+  }
+
+  /* ---------- Info blocks from the handbook ---------- */
+  function renderInfo(key) {
+    const th = theme(S.team.team.themeId);
+    if (!th) return el('div', { class: 'alert warn' }, icon('alert'), 'Theme not yet assigned by the administrator.');
+    const box = el('div', { class: 'info-box selectable' });
+    if (key === 'theme:summary') {
+      const art = th.artefacts.filter(a => a.name === S.team.team.artefact)[0];
+      add(box, [el('div', { class: 'row' }, el('span', { class: 'badge brand' }, th.id), el('b', null, th.name)), el('p', { style: { marginTop: '6px' } }, el('i', null, th.subtitle)),
+        art ? el('p', null, el('b', null, 'Artefact: '), art.name, ' — ', art.focus) : el('p', { class: 'muted' }, 'Artefact not yet selected.'),
+        el('div', { class: 'row', style: { margin: '6px 0' } }, th.focus.map(f => el('span', { class: 'badge' }, f))),
+        el('b', null, 'Foundational courses integrated'), el('ul', null, th.courses.map(c => el('li', null, c))),
+        el('b', null, 'Core concepts to be consolidated'), el('ul', null, th.coreConcepts.map(c => el('li', null, c)))]);
+    } else if (key === 'theme:frExample') {
+      add(box, [el('div', { class: 'compare' }, el('div', { class: 'bad' }, el('b', null, '✗ Not a functional requirement'), el('div', null, th.frExample.bad)), el('div', { class: 'ok' }, el('b', null, '✓ A functional requirement'), el('div', null, th.frExample.good))),
+        el('p', { style: { marginTop: '10px' } }, el('b', null, 'Measurement method: '), th.frExample.method),
+        el('p', null, el('b', null, 'Minimum FRs for ' + th.short + ': '), th.minFR, '. Every FR: number + unit, measurement method, and source.')]);
+    } else if (key === 'theme:sfd') {
+      add(box, [el('b', null, 'Forward path (' + th.short + ')'),
+        el('div', { class: 'flow' }, th.sfdBlocks.map((b, i) => [i ? el('span', { class: 'a' }, '→') : null, el('span', { class: 'b' }, b)])),
+        el('p', null, el('b', null, 'Feedback: '), th.feedback),
+        el('p', { class: 'small muted' }, 'A block is not labelled until it shows: (1) function name, (2) input signal and range, (3) output signal and range, (4) governing equation, (5) FR satisfied, (6) foundational course.')]);
+    } else if (key === 'theme:s3') {
+      add(box, el('div', { class: 'tbl-wrap' }, el('table', { class: 't' }, el('thead', null, el('tr', null, el('th', null, 'Parameter to measure'), el('th', null, 'Method'), el('th', null, 'FR it informs / S4 calculation it feeds'))),
+        el('tbody', null, th.s3Params.map(p => el('tr', null, el('td', null, p.p), el('td', null, p.m), el('td', null, p.f)))))));
+    } else if (key === 'theme:plantModel') {
+      add(box, el('div', { class: 'mono' }, th.plantModel));
+    } else if (key === 'theme:debug') {
+      add(box, [el('div', { class: 'compare' }, el('div', { class: 'bad' }, el('b', null, '✗ Invalid entry (shortcut)'), el('div', null, th.debugExample.invalid)), el('div', { class: 'ok' }, el('b', null, '✓ Valid entry (engineering diagnosis)'), el('div', null, th.debugExample.valid))),
+        el('p', { style: { marginTop: '10px' } }, el('b', null, 'Requirement for ' + th.short + ': '), th.map.testing),
+        el('p', { class: 'small muted' }, 'Minimum completed cycles: 1 before Review 3 · 2 before Review 4 (one control-loop/feedback failure) · 3 before the Final Review.')]);
+    } else add(box, el('span', { class: 'muted' }, 'Reference'));
+    return box;
+  }
+
+  /* ---------- Evidence ---------- */
+  function renderEvidence(stage, sec, editable) {
+    const T = S.team, u = S.boot.user;
+    const wrap = el('div');
+    const list = el('div', { class: 'ev-list' });
+    const draw = () => {
+      clear(list);
+      const items = T.evidence.filter(e => e.sectionId === sec.id);
+      if (!items.length) list.appendChild(el('div', { class: 'small muted' }, 'No evidence uploaded yet.'));
+      items.forEach(e => list.appendChild(el('div', { class: 'ev' },
+        el('div', { class: 'ic' }, icon(e.mimeType === 'link' ? 'link' : 'file')),
+        el('div', { style: { flex: 1, minWidth: 0 } },
+          el('a', { class: 'n', href: e.url, target: '_blank', rel: 'noopener noreferrer' }, e.name),
+          e.caption ? el('div', { class: 'small' }, e.caption) : null,
+          el('div', { class: 'tiny muted' }, (e.size ? Math.round(e.size / 1024) + ' KB · ' : '') + fmt(e.uploadedAt) + ' · ' + e.uploadedBy)),
+        editable && (u.role === 'admin' || e.uploadedBy === u.email) ? el('button', { class: 'btn ghost sm', title: 'Remove', 'aria-label': 'Remove evidence', onclick: async () => {
+          if (!(await confirmBox('Remove evidence', 'Remove "' + e.name + '" from the portfolio? The Drive file is kept for audit.', 'Remove', true))) return;
+          try { await call('deleteEvidence', { id: e.id }); T.evidence = T.evidence.filter(x => x.id !== e.id); draw(); refreshProgress(); } catch (x) { toast(x.message, 'bad'); }
+        } }, icon('trash')) : null)));
+    };
+    draw();
+    wrap.appendChild(list);
+    if (editable) {
+      const caption = el('input', { type: 'text', placeholder: 'Caption (optional) — e.g. "Step-load response, 10→100% load, 20 MHz BW"' });
+      const file = el('input', { type: 'file', multiple: true, class: 'hidden', accept: 'image/*,application/pdf,.csv,.xlsx,.xls,.docx,.doc,.pptx,.txt,.zip,.ino,.c,.h,.py,.m,.json,video/*' });
+      const drop = el('div', { class: 'drop', tabindex: '0', role: 'button' }, icon('upload'), el('div', null, el('b', null, 'Click to upload'), ' or drag files here'), el('div', { class: 'tiny' }, 'Images, PDF, data, code · max 10 MB each'));
+      drop.onclick = () => file.click();
+      drop.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); file.click(); } };
+      drop.ondragover = e => { e.preventDefault(); drop.classList.add('over'); };
+      drop.ondragleave = () => drop.classList.remove('over');
+      drop.ondrop = e => { e.preventDefault(); drop.classList.remove('over'); upload(e.dataTransfer.files); };
+      file.onchange = () => { upload(file.files); file.value = ''; };
+      async function upload(files) {
+        for (const f of Array.from(files || [])) {
+          if (f.size > 10 * 1024 * 1024) { toast(f.name + ' exceeds 10 MB — add it as a Drive link instead.', 'bad'); continue; }
+          const t = el('div', { class: 'small muted' }, 'Uploading ' + f.name + '…'); list.appendChild(t);
+          try {
+            const b64 = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1] || ''); r.onerror = () => rej(new Error('Could not read file.')); r.readAsDataURL(f); });
+            const e = await call('uploadEvidence', { teamId: T.team.id, stageId: stage.id, sectionId: sec.id, name: f.name, mimeType: f.type, base64: b64, caption: caption.value.trim() });
+            T.evidence.push(e); toast('Uploaded ' + f.name, 'ok');
+          } catch (x) { toast(x.message, 'bad'); }
+        }
+        caption.value = ''; draw(); refreshProgress();
+      }
+      const linkBtn = el('button', { class: 'btn sm' }, icon('link'), 'Add link');
+      linkBtn.onclick = async () => {
+        const url = await promptBox('Add evidence link', 'HTTPS link (Drive file, Git repository, video…)', { required: true, ok: 'Add' });
+        if (!url) return;
+        try { const e = await call('addLinkEvidence', { teamId: T.team.id, stageId: stage.id, sectionId: sec.id, url: url, caption: caption.value.trim() }); T.evidence.push(e); caption.value = ''; draw(); refreshProgress(); }
+        catch (x) { toast(x.message, 'bad'); }
+      };
+      wrap.appendChild(el('div', { class: 'stack', style: { marginTop: '14px' } }, caption, drop, file, el('div', null, linkBtn)));
+    }
+    return wrap;
+  }
+
+  /* ---------- Comments ---------- */
+  function renderComments(stage, sec) {
+    const T = S.team;
+    const items = () => T.comments.filter(c => c.sectionId === sec.id);
+    const box = el('div', { class: 'comments' });
+    let open = false;
+    const draw = () => {
+      clear(box);
+      const n = items().length;
+      box.appendChild(el('button', { class: 'btn ghost sm', onclick: () => { open = !open; draw(); } }, icon('msg'), n ? n + ' comment' + (n > 1 ? 's' : '') : 'Comment', open ? ' ▴' : ' ▾'));
+      if (!open) return;
+      items().forEach(c => box.appendChild(el('div', { class: 'cmt ' + (c.role !== 'student' ? 'faculty' : '') },
+        el('div', { class: 'avatar' }, initials(c.authorName)),
+        el('div', { style: { flex: 1, minWidth: 0 } }, el('div', { class: 'tiny muted' }, el('b', null, c.authorName), ' · ' + (ROLE[c.role] || c.role) + ' · ' + fmt(c.createdAt)), el('div', { class: 'bubble selectable' }, c.text)))));
+      const ta = el('textarea', { placeholder: S.boot.user.role === 'student' ? 'Reply to your guide…' : 'Review comment for the team (use the Five Lenses)…', rows: 2 });
+      const b = el('button', { class: 'btn primary sm' }, icon('send'), 'Post');
+      b.onclick = async () => {
+        if (!ta.value.trim()) return;
+        busy(b, true, 'Posting…');
+        try { const c = await call('addComment', { teamId: T.team.id, stageId: stage.id, sectionId: sec.id, text: ta.value }); T.comments.push(c); draw(); }
+        catch (e) { busy(b, false); toast(e.message, 'bad'); }
+      };
+      box.appendChild(el('div', { class: 'stack', style: { marginTop: '8px' } }, ta, el('div', null, b)));
+    };
+    draw();
+    return box;
+  }
+
+  /* ==========================================================================
+   * 9. Reviews & assessment
+   * ======================================================================== */
+  function drawReviews(pane) {
+    const T = S.team, u = S.boot.user, th = theme(T.team.themeId) || { map: {} };
+    const canReview = u.role === 'faculty' || u.role === 'admin';
+    const showMarks = u.role !== 'student' || S.boot.settings.showMarksToStudents;
+    const byId = {}; T.reviews.forEach(r => byId[r.reviewId] = r);
+
+    if (showMarks) {
+      const fin = byId.FINAL || {};
+      const tbody = el('tbody');
+      T.members.forEach(m => {
+        const parts = S.boot.reviews.map(r => Number((byId[r.id] || {}).marks) || 0);
+        const viva = Number(((fin.extra || {}).viva || {})[m.email]) || 0;
+        const art = Number((fin.extra || {}).artefact) || 0;
+        const tot = parts.reduce((a, b) => a + b, 0) + viva + art;
+        tbody.appendChild(el('tr', null, el('td', null, m.name, el('div', { class: 'tiny muted' }, m.usn)), parts.map(p => el('td', null, p || '—')), el('td', null, viva || '—'), el('td', null, art || '—'), el('td', null, el('b', null, tot + ' / 100'))));
+      });
+      pane.appendChild(el('div', { class: 'card', style: { marginBottom: '18px' } }, el('div', { class: 'card-h' }, el('h3', null, 'Marks summary (Handbook 7.1 — review-wise distribution)')),
+        el('div', { class: 'tbl-wrap', style: { border: 0 } }, el('table', { class: 't' }, el('thead', null, el('tr', null, el('th', null, 'Student'), S.boot.reviews.map(r => el('th', null, (r.id === 'FINAL' ? 'Final' : r.id) + ' /' + r.marks)), el('th', null, 'Viva /10'), el('th', null, 'Artefact /5'), el('th', null, 'Total'))), tbody)),
+        el('div', { class: 'card-b small muted' }, 'Calibration reminder: a team with an impressive artefact whose members cannot independently answer the Five Lenses should not score above 50 / 100.')));
+    }
+
+    S.boot.reviews.forEach(rv => {
+      const r = byId[rv.id] || { gate: {}, bands: {}, extra: {} };
+      const auto = autoChecks(rv);
+      const card = el('div', { class: 'card', style: { marginBottom: '18px' } });
+      card.appendChild(el('div', { class: 'card-h' }, el('h3', { style: { flex: 1 } }, rv.name), rv.hardGate ? el('span', { class: 'badge bad' }, 'Hard gate') : null, el('span', { class: 'badge' }, rv.timing), el('span', { class: 'badge brand' }, rv.marks + ' marks'), decisionBadge(r.decision)));
+      const b = el('div', { class: 'card-b' });
+      card.appendChild(b);
+      b.appendChild(el('p', { class: 'small muted' }, rv.protects));
+      b.appendChild(el('div', { class: 'row', style: { marginBottom: '12px' } }, auto.map(a => el('span', { class: 'badge ' + (a.ok ? 'ok' : 'warn') }, (a.ok ? '✓ ' : '• ') + a.label))));
+
+      const gateInputs = rv.gate.map((g, i) => el('input', { type: 'checkbox', checked: !!(r.gate || {})[i], disabled: !canReview }));
+      b.appendChild(el('h4', null, 'Gate criteria (Handbook 7.2)'));
+      b.appendChild(el('div', { style: { margin: '6px 0 14px' } }, rv.gate.map((g, i) => el('label', { class: 'check' }, gateInputs[i], el('span', null, g)))));
+
+      const bandSel = {};
+      if (showMarks || canReview) {
+        b.appendChild(el('h4', null, 'Rubric components (Handbook 5.3)'));
+        const rows = rv.rubric.map(cid => {
+          const comp = S.boot.rubric.filter(x => x.id === cid)[0];
+          bandSel[cid] = select([{ v: '', l: 'Not yet due' }].concat(S.boot.bands.map(bd => ({ v: bd.id, l: bd.name + ' (' + bd.range + ')' }))), (r.bands || {})[cid] || '', { disabled: !canReview });
+          return el('div', { class: 'info-box', style: { marginBottom: '10px' } },
+            el('div', { class: 'row between' }, el('b', null, comp.name + ' — ' + comp.marks + ' marks'), el('div', { style: { minWidth: '220px' } }, bandSel[cid])),
+            el('details', { style: { marginTop: '6px' } }, el('summary', { class: 'small', style: { cursor: 'pointer', color: 'var(--brand)' } }, 'Band descriptors for ' + (th.short || 'this theme')),
+              el('ul', { class: 'small' }, el('li', null, el('b', null, 'Exemplary: '), th.map[cid] || ''), el('li', null, el('b', null, 'Competent: '), comp.C), el('li', null, el('b', null, 'Developing: '), comp.D), el('li', null, el('b', null, 'Inadequate: '), comp.I))));
+        });
+        add(b, rows);
+      }
+      const suggest = el('span', { class: 'small muted' });
+      const calc = () => {
+        let num = 0, den = 0;
+        rv.rubric.forEach(cid => { const comp = S.boot.rubric.filter(x => x.id === cid)[0]; const bd = S.boot.bands.filter(x => x.id === bandSel[cid].value)[0]; if (bd) { num += bd.factor * comp.marks; den += comp.marks; } });
+        suggest.textContent = den ? 'Suggested from bands: ' + (Math.round(num / den * rv.marks * 2) / 2) + ' / ' + rv.marks : '';
+      };
+      Object.values(bandSel).forEach(s => s.addEventListener('change', calc)); calc();
+
+      const lens = el('textarea', { value: r.lensNotes || '', disabled: !canReview, rows: 3, placeholder: 'Notes against the Five Lenses: FR · SFD & course · driving calculation · predicted vs measured · failure & root cause' });
+      const marks = el('input', { type: 'number', min: 0, max: rv.marks, step: 0.5, value: r.marks === '' || r.marks === undefined ? '' : r.marks, disabled: !canReview });
+      const decision = select(['', 'In progress', 'Cleared', 'Not cleared'], r.decision, { disabled: !canReview });
+      const comment = el('textarea', { value: r.comment || '', disabled: !canReview, rows: 3, placeholder: 'Feedback to the team' });
+      const extraIn = {};
+      if (canReview || u.role === 'student') {
+        if (canReview) b.appendChild(field('Five Lenses notes', lens));
+        else if (r.lensNotes) b.appendChild(field('Reviewer notes', el('div', { class: 'info-box selectable', style: { whiteSpace: 'pre-wrap' } }, r.lensNotes)));
+        if (canReview) {
+          b.appendChild(el('div', { class: 'grid g2' }, field('Marks awarded (out of ' + rv.marks + ')', marks, suggest), field('Gate decision', decision, rv.hardGate ? 'Teams cannot record S6/S7 until this gate is "Cleared".' : '')));
+          if (rv.id === 'FINAL') {
+            extraIn.viva = {};
+            b.appendChild(el('h4', { style: { marginTop: '6px' } }, 'Individual viva (10) and final artefact (5)'));
+            b.appendChild(el('div', { class: 'grid g3', style: { margin: '8px 0 14px' } },
+              T.members.map(m => { extraIn.viva[m.email] = el('input', { type: 'number', min: 0, max: 10, step: 0.5, value: (((r.extra || {}).viva || {})[m.email] === undefined ? '' : r.extra.viva[m.email]) }); return field(m.name + ' — viva /10', extraIn.viva[m.email]); }),
+              field('Final working artefact /5', extraIn.art = el('input', { type: 'number', min: 0, max: 5, step: 0.5, value: (r.extra || {}).artefact === undefined ? '' : r.extra.artefact }))));
+          }
+          b.appendChild(field('Comment to team', comment));
+        } else if (r.comment) b.appendChild(field('Feedback from ' + (r.facultyName || 'guide'), el('div', { class: 'info-box selectable', style: { whiteSpace: 'pre-wrap' } }, r.comment)));
+        if (showMarks && !canReview && r.marks !== '' && r.marks !== undefined) b.appendChild(el('p', null, el('b', null, 'Marks: '), r.marks + ' / ' + rv.marks));
+      }
+      if (canReview) {
+        const save = el('button', { class: 'btn primary' }, icon('check'), 'Save review');
+        save.onclick = async () => {
+          const gate = {}; gateInputs.forEach((g, i) => { if (g.checked) gate[i] = true; });
+          const bands = {}; Object.keys(bandSel).forEach(k => { if (bandSel[k].value) bands[k] = bandSel[k].value; });
+          const extra = {};
+          if (extraIn.viva) { extra.viva = {}; Object.keys(extraIn.viva).forEach(k => extra.viva[k] = extraIn.viva[k].value); extra.artefact = extraIn.art.value; }
+          if (decision.value === 'Cleared' && gateInputs.some(g => !g.checked)) {
+            if (!(await confirmBox('Clear gate with unchecked criteria?', 'Not all gate criteria are ticked. Clear this review anyway?', 'Clear anyway'))) return;
+          }
+          busy(save, true, 'Saving…');
+          try {
+            await call('saveReview', { teamId: T.team.id, reviewId: rv.id, gate: gate, bands: bands, lensNotes: lens.value, marks: marks.value, decision: decision.value, comment: comment.value, extra: extra });
+            await loadTeam(); toast('Review saved.', 'ok'); drawTeam();
+          } catch (e) { busy(save, false); toast(e.message, 'bad'); }
+        };
+        card.appendChild(el('div', { class: 'sec-foot' }, el('span', { class: 'small muted', style: { flex: 1 } }, r.updatedAt ? 'Last saved ' + fmt(r.updatedAt) + ' by ' + r.facultyName : 'Not reviewed yet'), save));
+      }
+      pane.appendChild(card);
+    });
+
+    pane.appendChild(el('div', { class: 'card' }, el('div', { class: 'card-h' }, el('h3', null, "The Reviewer's Five Lenses (Handbook 7.3)")),
+      el('div', { class: 'card-b' }, S.boot.lenses.map(l => el('div', { style: { marginBottom: '10px' } }, el('b', null, l.n + '. ' + l.name), el('div', { class: 'small' }, l.q))))));
+  }
+
+  function autoChecks(rv) {
+    const T = S.team, out = [];
+    rv.stages.forEach(id => { const s = S.boot.stages.filter(x => x.id === id)[0]; if (!s) return; const p = (T.progress[id] || {}).pct || 0; out.push({ ok: p >= 100, label: s.code + ' ' + p + '% complete' }); });
+    if (rv.debugMin) out.push({ ok: T.debugCycles >= rv.debugMin, label: 'Debug log ' + T.debugCycles + ' / ' + rv.debugMin + ' cycles' });
+    if (rv.id === 'R1') { const r = T.records['S1-B']; out.push({ ok: !!(r && r.lockedAt), label: 'FR table frozen & dated' }); }
+    if (rv.id === 'R3') { const r = T.records['S5P-A']; out.push({ ok: !!(r && r.lockedAt), label: 'S5-PRE signed by all members' }); }
+    if (rv.id === 'R4') { const r = T.records['S6-A']; out.push({ ok: !!(r && r.lockedAt), label: 'Loop predictions signed' }); }
+    T.flags.forEach(f => out.push({ ok: false, label: f }));
+    return out;
+  }
+
+  /* ==========================================================================
+   * 10. AI Mentor
+   * ======================================================================== */
+  function drawMentor(pane) {
+    const T = S.team, u = S.boot.user;
+    const canChat = u.role === 'student' || u.role === 'admin';
+    const stages = stageList();
+    const stageSel = select(stages.map(s => ({ v: s.id, l: s.code + ' — ' + s.title })), S.stageId || (stages[0] || {}).id);
+    const modeSel = select([{ v: 'mentor', l: 'Mentoring conversation' }, { v: 'questions', l: 'Ask me foundational questions' }, { v: 'review', l: 'Critique my saved records' }, { v: 'viva', l: 'Mock viva — Five Lenses' }], 'mentor');
+    const filter = u.role !== 'student' ? select([{ v: '', l: 'All stages' }].concat(stages.map(s => ({ v: s.id, l: s.code }))), '') : null;
+    const log = el('div', { class: 'chat-log', 'aria-live': 'polite' });
+    const input = el('textarea', { placeholder: 'Ask about your design, a concept, or request questions… (Enter to send, Shift+Enter for a new line)', rows: 2, disabled: !canChat });
+    const send = el('button', { class: 'btn primary', disabled: !canChat }, icon('send'), el('span', { class: 'hide-sm' }, 'Send'));
+    const usage = el('span', { class: 'tiny muted' });
+
+    const msgEl = m => {
+      const isUser = m.role === 'user';
+      const node = el('div', { class: 'msg ' + (isUser ? 'user' : 'model') },
+        el('div', { class: 'meta' }, (isUser ? m.userName : 'AI Mentor') + ' · ' + (stages.filter(s => s.id === m.stageId)[0] || {}).code + ' · ' + fmt(m.createdAt)),
+        isUser ? el('div', { class: 'b selectable' }, m.text) : el('div', { class: 'b selectable', html: md(m.text) }),
+        m.facultyNote ? el('div', { class: 'note' }, '📝 ' + (m.noteBy || 'Faculty') + ': ' + m.facultyNote) : null);
+      if (!isUser && (u.role === 'faculty' || u.role === 'admin')) {
+        node.appendChild(el('button', { class: 'btn ghost sm', style: { alignSelf: 'flex-start' }, onclick: async () => {
+          const n = await promptBox('Faculty note on this mentor reply', 'Note (visible to the team)', { multiline: true, value: m.facultyNote || '' });
+          if (n === null) return;
+          try { await call('mentorNote', { id: m.id, note: n }); m.facultyNote = n; m.noteBy = u.name; drawLog(); } catch (e) { toast(e.message, 'bad'); }
+        } }, icon('edit'), m.facultyNote ? 'Edit note' : 'Add note'));
+      }
+      return node;
+    };
+    const drawLog = () => {
+      clear(log);
+      const items = (S.mentor || []).filter(m => !filter || !filter.value || m.stageId === filter.value);
+      if (!items.length) log.appendChild(el('div', { class: 'muted small', style: { textAlign: 'center', margin: 'auto' } },
+        el('div', { style: { fontSize: '34px' } }, '🧭'), el('b', null, 'Your team’s AI Mentor'),
+        el('p', null, 'It asks technical and foundational questions using the handbook, your theme, the stage requirements and your saved records. It guides — it will not fill in your worksheets.')));
+      items.forEach(m => log.appendChild(msgEl(m)));
+      log.scrollTop = log.scrollHeight;
+    };
+    const doSend = async () => {
+      const text = input.value.trim();
+      if (!S.mentor || (!text && modeSel.value === 'mentor')) return;
+      const msg = text || (modeSel.value === 'questions' ? 'Please ask me questions for this stage.' : modeSel.value === 'review' ? 'Please critique our saved records for this stage.' : 'Start my mock viva.');
+      input.value = ''; busy(send, true, '…');
+      const pending = { role: 'user', userName: u.name, text: msg, stageId: stageSel.value, createdAt: new Date().toISOString() };
+      S.mentor.push(pending); drawLog();
+      const typing = el('div', { class: 'msg model' }, el('div', { class: 'b' }, el('span', { class: 'typing' }, el('i'), el('i'), el('i'))));
+      log.appendChild(typing); log.scrollTop = log.scrollHeight;
+      try {
+        const r = await call('mentorChat', { teamId: T.team.id, stageId: stageSel.value, mode: modeSel.value, message: msg });
+        S.mentor.pop(); S.mentor.push(r.user, r.reply);
+        usage.textContent = r.usedToday + ' / ' + r.limit + ' team messages today';
+      } catch (e) { S.mentor.pop(); input.value = msg; toast(e.message, 'bad'); }
+      busy(send, false); drawLog(); input.focus();
+    };
+    send.onclick = doSend;
+    input.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); doSend(); } });
+    if (filter) filter.onchange = drawLog;
+
+    pane.appendChild(el('div', { class: 'card' },
+      el('div', { class: 'card-h' }, el('div', { class: 'row', style: { flex: 1 } }, el('span', { class: 'ic avatar' }, icon('bot')), el('div', null, el('h3', null, 'AI Mentor'), el('div', { class: 'tiny muted' }, 'Gemini · team-wise history · reviewed by faculty'))),
+        canChat ? el('div', { style: { minWidth: '220px', flex: '1 1 220px' } }, stageSel) : null, canChat ? el('div', { style: { minWidth: '220px', flex: '1 1 220px' } }, modeSel) : null,
+        filter ? el('div', { style: { minWidth: '160px' } }, filter) : null),
+      !S.boot.settings.mentorEnabled ? el('div', { class: 'card-b' }, el('div', { class: 'alert warn' }, icon('alert'), 'The AI Mentor is not configured yet. The administrator must set the Gemini API key.')) : null,
+      el('div', { class: 'chat' }, log, canChat ? el('div', { class: 'chat-in' }, input, send) : el('div', { class: 'chat-in small muted' }, 'Read-only review of the team’s AI Mentor interactions. Add notes on replies to guide the team.')),
+      canChat ? el('div', { class: 'card-b', style: { paddingTop: '6px', paddingBottom: '10px' } }, usage) : null));
+
+    if (S.mentor && S.mentor._team === T.team.id) drawLog();
+    else { log.appendChild(loader('Loading conversation…')); call('mentorHistory', { teamId: T.team.id }).then(h => { S.mentor = h; S.mentor._team = T.team.id; drawLog(); }).catch(e => { clear(log).appendChild(el('div', { class: 'alert bad' }, e.message)); }); }
+  }
+
+  /* ==========================================================================
+   * 11. Team info & evidence index
+   * ======================================================================== */
+  function drawInfo(pane) {
+    const T = S.team;
+    const person = (p, role) => p ? el('div', { class: 'row', style: { padding: '8px 0', borderBottom: '1px solid var(--line)' } }, el('div', { class: 'avatar' }, initials(p.name)), el('div', { style: { flex: 1 } }, el('b', null, p.name), el('div', { class: 'tiny muted' }, (p.usn ? p.usn + ' · ' : '') + (p.designation ? p.designation + ' · ' : '') + (p.email || ''))), el('span', { class: 'badge' }, role)) : null;
+    pane.appendChild(el('div', { class: 'grid g2' },
+      el('div', { class: 'card' }, el('div', { class: 'card-h' }, el('h3', null, 'Team')), el('div', { class: 'card-b' },
+        person(T.guide, 'Guide'), person(T.coGuide, 'Co-guide'), T.reviewers.map(r => person(r, 'Reviewer')), T.members.map(m => person(m, 'Student')),
+        T.team.folderUrl ? el('p', { style: { marginTop: '12px' } }, el('a', { href: T.team.folderUrl, target: '_blank', rel: 'noopener noreferrer' }, icon('folder'), ' Open team evidence folder in Drive')) : null)),
+      el('div', { class: 'card' }, el('div', { class: 'card-h' }, el('h3', null, 'Evidence index (' + T.evidence.length + ')')), el('div', { class: 'card-b' },
+        T.evidence.length ? el('div', { class: 'tbl-wrap' }, el('table', { class: 't' }, el('thead', null, el('tr', null, el('th', null, 'Stage'), el('th', null, 'File'), el('th', null, 'Uploaded'))),
+          el('tbody', null, T.evidence.slice().reverse().map(e => el('tr', null, el('td', null, el('span', { class: 'badge brand mono' }, (S.boot.stages.filter(s => s.id === e.stageId)[0] || {}).code || e.stageId)),
+            el('td', null, el('a', { href: e.url, target: '_blank', rel: 'noopener noreferrer' }, e.name), e.caption ? el('div', { class: 'tiny muted' }, e.caption) : null), el('td', { class: 'tiny' }, fmt(e.uploadedAt))))))) : el('p', { class: 'muted' }, 'No evidence yet.')))));
+  }
+
+  /* ==========================================================================
+   * 12. Administration
+   * ======================================================================== */
+  async function viewAdmin() {
+    setTitle('Administration');
+    clear(contentEl).appendChild(loader('Loading administration data…'));
+    try { S.admin = await call('adminData'); } catch (e) { clear(contentEl).appendChild(el('div', { class: 'alert bad' }, icon('alert'), e.message)); return; }
+    drawAdmin();
+  }
+  function drawAdmin() {
+    const tabs = [['faculty', 'Faculty'], ['students', 'Students'], ['teams', 'Teams'], ['gemini', 'Gemini AI'], ['settings', 'Settings'], ['audit', 'Audit log']];
+    const c = clear(contentEl);
+    c.appendChild(el('div', { class: 'row between', style: { marginBottom: '12px' } }, el('div', null, el('h1', null, 'Administration'), el('div', { class: 'small muted' }, S.boot.dept.name + ' · all changes are saved to the backend automatically — no manual sheet edits needed.'))));
+    c.appendChild(el('div', { class: 'tabs' }, tabs.map(t => el('button', { class: S.adminTab === t[0] ? 'active' : '', onclick: () => { S.adminTab = t[0]; drawAdmin(); } }, t[1]))));
+    const pane = el('div'); c.appendChild(pane);
+    ({ faculty: admFaculty, students: admStudents, teams: admTeams, gemini: admGemini, settings: admSettings, audit: admAudit })[S.adminTab](pane);
+  }
+  const A = () => S.admin;
+  const facName = id => (A().faculty.filter(f => f.id === id)[0] || {}).name || '';
+  const teamName = id => (A().teams.filter(t => t.id === id)[0] || {}).name || '';
+  const isTrue = v => v === true || String(v) === 'true';
+
+  function tableCard(title, actions, headers, rows, emptyText) {
+    return el('div', { class: 'card' }, el('div', { class: 'card-h' }, el('h3', { style: { flex: 1 } }, title), actions),
+      el('div', { class: 'tbl-wrap', style: { border: 0, borderRadius: 0 } }, el('table', { class: 't' }, el('thead', null, el('tr', null, headers.map(h => el('th', null, h)))),
+        el('tbody', null, rows.length ? rows : el('tr', null, el('td', { colspan: headers.length, class: 'muted', style: { textAlign: 'center', padding: '24px' } }, emptyText || 'Nothing here yet.'))))));
+  }
+
+  /* ----- Faculty ----- */
+  function admFaculty(pane) {
+    const q = el('input', { type: 'text', placeholder: 'Search…', style: { maxWidth: '220px' } });
+    const holder = el('div');
+    const draw = () => {
+      const s = q.value.toLowerCase();
+      const rows = A().faculty.filter(f => !s || [f.name, f.email, f.designation].join(' ').toLowerCase().indexOf(s) >= 0).map(f => {
+        const teams = A().teams.filter(t => t.guideId === f.id || t.coGuideId === f.id || String(t.reviewerIds || '').split(',').indexOf(f.id) >= 0);
+        return el('tr', null, el('td', null, el('b', null, f.name), el('div', { class: 'tiny muted' }, f.designation)), el('td', { class: 'small' }, f.email || el('span', { class: 'badge warn' }, 'No email — cannot sign in')),
+          el('td', null, el('span', { class: 'badge ' + (f.role === 'HoD/Admin' ? 'brand' : '') }, f.role)), el('td', null, isTrue(f.active) ? el('span', { class: 'badge ok' }, 'Active') : el('span', { class: 'badge' }, 'Inactive')),
+          el('td', { class: 'small' }, teams.map(t => t.name).join(', ') || el('span', { class: 'muted' }, '—')),
+          el('td', null, el('div', { class: 'row', style: { flexWrap: 'nowrap' } }, el('button', { class: 'btn sm', onclick: () => editFaculty(f) }, icon('edit'), 'Edit'),
+            el('button', { class: 'btn sm danger', 'aria-label': 'Remove', onclick: async () => { if (!(await confirmBox('Remove faculty', 'Remove ' + f.name + '? They will be unassigned from all teams.', 'Remove', true))) return; try { A().faculty = await call('deleteFaculty', { id: f.id }); A().teams = (await call('adminData')).teams; drawAdmin(); toast('Removed.', 'ok'); } catch (e) { toast(e.message, 'bad'); } } }, icon('trash')))));
+      });
+      clear(holder).appendChild(tableCard('Faculty (' + A().faculty.length + ')', el('div', { class: 'row' }, q, el('button', { class: 'btn', onclick: () => bulk('faculty') }, icon('upload'), 'Bulk add'), el('button', { class: 'btn primary', onclick: () => editFaculty({}) }, icon('plus'), 'Add faculty')),
+        ['Name', 'Email', 'Role', 'Status', 'Assigned teams', ''], rows, 'No faculty yet. Add guides and the HoD here.'));
+    };
+    q.oninput = draw; draw(); pane.appendChild(holder);
+    pane.appendChild(el('p', { class: 'small muted', style: { marginTop: '10px' } }, 'The script owner (' + A().owner + ') is always an administrator. Faculty with role "HoD/Admin" also get full department access.'));
+  }
+  function editFaculty(f) {
+    const i = { name: el('input', { type: 'text', value: f.name || '' }), email: el('input', { type: 'email', value: f.email || '' }), designation: el('input', { type: 'text', value: f.designation || '', placeholder: 'Assistant Professor' }),
+      phone: el('input', { type: 'text', value: f.phone || '' }), role: select(['Faculty', 'HoD/Admin'], f.role || 'Faculty'), active: el('input', { type: 'checkbox', checked: f.id ? isTrue(f.active) : true }) };
+    modal({ title: f.id ? 'Edit faculty' : 'Add faculty', body: el('div', null, el('div', { class: 'grid g2' }, field('Full name', i.name), field('Email (Google account)', i.email, 'Optional — needed only to sign in.'), field('Designation', i.designation), field('Phone', i.phone), field('Role', i.role)), el('label', { class: 'check' }, i.active, 'Active')),
+      actions: [{ label: 'Cancel', fn: c => c() }, { label: 'Save', cls: 'primary', fn: async c => { try { A().faculty = await call('saveFaculty', { id: f.id, name: i.name.value, email: i.email.value, designation: i.designation.value, phone: i.phone.value, role: i.role.value, active: i.active.checked }); c(); drawAdmin(); toast('Saved.', 'ok'); } catch (e) { toast(e.message, 'bad'); } } }] });
+  }
+  function bulk(kind) {
+    const ta = el('textarea', { rows: 10, placeholder: kind === 'faculty' ? 'Name, Email, Designation, Role(optional: HoD/Admin)\nDr. A. Kumar, akumar@kletech.ac.in, Professor, HoD/Admin' : 'SRN, Name, Email(optional), Team name(optional)\n02FE24BEE001, Jyoti Deepak Patil, jyoti@kletech.ac.in, Team 1\n02FE24BEE043, Bhushan Gudasi, , Team 1' });
+    modal({ title: kind === 'faculty' ? 'Bulk add faculty' : 'Bulk add students', body: el('div', null, el('p', { class: 'small muted' }, 'Paste one per line (comma- or tab-separated — you can paste directly from a spreadsheet).'), ta),
+      actions: [{ label: 'Cancel', fn: c => c() }, { label: 'Import', cls: 'primary', fn: async c => {
+        try { const r = await call(kind === 'faculty' ? 'bulkFaculty' : 'bulkStudents', { text: ta.value }); c(); S.admin = await call('adminData'); drawAdmin();
+          modal({ title: 'Import result', body: el('div', null, el('p', null, el('b', null, r.added), ' added.'), r.skipped.length ? el('div', { class: 'alert warn' }, el('div', null, el('b', null, r.skipped.length + ' skipped:'), r.skipped.map(s => el('div', { class: 'small' }, s)))) : null), actions: [{ label: 'OK', cls: 'primary', fn: c2 => c2() }] });
+        } catch (e) { toast(e.message, 'bad'); } } }] });
+  }
+
+  /* ----- Students ----- */
+  function admStudents(pane) {
+    const q = el('input', { type: 'text', placeholder: 'Search SRN, name, email…', style: { maxWidth: '240px' } });
+    const tf = select([{ v: '', l: 'All teams' }, { v: '_none', l: 'Unassigned' }].concat(A().teams.map(t => ({ v: t.id, l: t.name }))), '', { style: { maxWidth: '200px' } });
+    const holder = el('div');
+    const draw = () => {
+      const s = q.value.toLowerCase();
+      const rows = A().students.filter(x => (!s || [x.usn, x.name, x.email].join(' ').toLowerCase().indexOf(s) >= 0) && (!tf.value || (tf.value === '_none' ? !x.teamId : x.teamId === tf.value))).map(x =>
+        el('tr', null, el('td', { class: 'mono' }, x.usn), el('td', null, el('b', null, x.name)), el('td', { class: 'small' }, x.email || el('span', { class: 'badge warn' }, 'No email — cannot sign in')), el('td', null, x.teamId ? el('span', { class: 'badge brand' }, teamName(x.teamId)) : el('span', { class: 'badge warn' }, 'Unassigned')),
+          el('td', null, isTrue(x.active) ? el('span', { class: 'badge ok' }, 'Active') : el('span', { class: 'badge' }, 'Inactive')),
+          el('td', null, el('div', { class: 'row', style: { flexWrap: 'nowrap' } }, el('button', { class: 'btn sm', onclick: () => editStudent(x) }, icon('edit'), 'Edit'),
+            el('button', { class: 'btn sm danger', 'aria-label': 'Remove', onclick: async () => { if (!(await confirmBox('Remove student', 'Remove ' + x.name + '? Their saved records stay in the backend for audit.', 'Remove', true))) return; try { A().students = await call('deleteStudent', { id: x.id }); drawAdmin(); toast('Removed.', 'ok'); } catch (e) { toast(e.message, 'bad'); } } }, icon('trash'))))));
+      clear(holder).appendChild(tableCard('Students (' + A().students.length + ')', el('div', { class: 'row' }, q, tf, el('button', { class: 'btn', onclick: importRoster }, icon('users'), 'Import 2026–27 class list'), el('button', { class: 'btn', onclick: () => bulk('students') }, icon('upload'), 'Bulk add'), el('button', { class: 'btn primary', onclick: () => editStudent({}) }, icon('plus'), 'Add student')),
+        ['SRN', 'Name', 'Email', 'Team', 'Status', ''], rows, 'No students yet.'));
+    };
+    q.oninput = draw; tf.onchange = draw; draw(); pane.appendChild(holder);
+  }
+  async function importRoster() {
+    if (!(await confirmBox('Import 2026–27 class list', 'Adds the 17 mini project teams, 54 students (by SRN) and 11 guides from the department team list, with the agreed project titles. Existing entries are kept — nothing is duplicated or deleted.', 'Import'))) return;
+    try {
+      const r = await call('importRoster');
+      S.admin = await call('adminData'); drawAdmin();
+      toast('Imported: ' + r.teamsAdded + ' teams, ' + r.studentsAdded + ' students, ' + r.facultyAdded + ' guides added (' + (r.teamsUpdated + r.studentsUpdated) + ' already present).', 'ok');
+    } catch (e) { toast(e.message, 'bad'); }
+  }
+  function editStudent(x) {
+    const i = { usn: el('input', { type: 'text', value: x.usn || '' }), name: el('input', { type: 'text', value: x.name || '' }), email: el('input', { type: 'email', value: x.email || '' }),
+      team: select([{ v: '', l: '— Unassigned —' }].concat(A().teams.filter(t => t.status !== 'Archived').map(t => ({ v: t.id, l: t.name }))), x.teamId || ''), active: el('input', { type: 'checkbox', checked: x.id ? isTrue(x.active) : true }) };
+    modal({ title: x.id ? 'Edit student' : 'Add student', body: el('div', null, el('div', { class: 'grid g2' }, field('SRN', i.usn), field('Full name', i.name), field('Email (Google account)', i.email, 'Optional — needed only to sign in.'), field('Team', i.team)), el('label', { class: 'check' }, i.active, 'Active')),
+      actions: [{ label: 'Cancel', fn: c => c() }, { label: 'Save', cls: 'primary', fn: async c => { try { A().students = await call('saveStudent', { id: x.id, usn: i.usn.value, name: i.name.value, email: i.email.value, teamId: i.team.value, active: i.active.checked }); c(); drawAdmin(); toast('Saved.', 'ok'); } catch (e) { toast(e.message, 'bad'); } } }] });
+  }
+
+  /* ----- Teams ----- */
+  function admTeams(pane) {
+    const rows = A().teams.map(t => {
+      const th = theme(t.themeId) || {};
+      const mem = A().students.filter(s => s.teamId === t.id);
+      return el('tr', null, el('td', null, el('b', null, t.name), t.status === 'Archived' ? el('span', { class: 'badge', style: { marginLeft: '6px' } }, 'Archived') : null, el('div', { class: 'tiny muted' }, t.title)),
+        el('td', null, el('span', { class: 'badge brand' }, t.themeId), el('div', { class: 'tiny' }, th.name), el('div', { class: 'tiny muted' }, t.artefact)),
+        el('td', { class: 'small' }, facName(t.guideId) || el('span', { class: 'badge warn' }, 'No guide'), t.coGuideId ? el('div', { class: 'tiny muted' }, 'Co: ' + facName(t.coGuideId)) : null),
+        el('td', { class: 'small' }, mem.map(m => m.name).join(', ') || el('span', { class: 'muted' }, '—')),
+        el('td', null, el('div', { class: 'row', style: { flexWrap: 'nowrap' } },
+          el('button', { class: 'btn sm', onclick: () => go('team', { teamId: t.id, tab: 'portfolio', stageId: null }) }, icon('folder'), 'Open'),
+          el('button', { class: 'btn sm', onclick: () => editTeam(t) }, icon('edit'), 'Edit'),
+          el('button', { class: 'btn sm ' + (t.status === 'Archived' ? '' : 'danger'), onclick: async () => { const r = t.status === 'Archived'; if (!r && !(await confirmBox('Archive team', 'Archive ' + t.name + '? All records are preserved; the team becomes read-only and hidden from guides.', 'Archive', true))) return; try { A().teams = await call('archiveTeam', { id: t.id, restore: r }); drawAdmin(); } catch (e) { toast(e.message, 'bad'); } } }, t.status === 'Archived' ? 'Restore' : 'Archive'))));
+    });
+    pane.appendChild(tableCard('Teams (' + A().teams.length + ')', el('button', { class: 'btn primary', onclick: () => editTeam({}) }, icon('plus'), 'Create team'), ['Team', 'Theme / Artefact', 'Guide', 'Members', ''], rows, 'No teams yet — create the first team.'));
+  }
+  function editTeam(t) {
+    const facOpts = [{ v: '', l: '— None —' }].concat(A().faculty.filter(f => isTrue(f.active)).map(f => ({ v: f.id, l: f.name })));
+    const i = { name: el('input', { type: 'text', value: t.name || '', placeholder: 'e.g. EEE-T1-Buck-01' }), title: el('input', { type: 'text', value: t.title || '', placeholder: 'Artefact-based title' }),
+      theme: select([{ v: '', l: 'Select theme…' }].concat(S.boot.themes.map(x => ({ v: x.id, l: x.id + ' — ' + x.name }))), t.themeId || ''), artefact: el('select'),
+      guide: select(facOpts, t.guideId || ''), co: select(facOpts, t.coGuideId || '') };
+    const fillArt = () => { clear(i.artefact); const th = theme(i.theme.value); [{ v: '', l: th ? 'Select artefact…' : 'Select a theme first' }].concat(th ? th.artefacts.map(a => ({ v: a.name, l: a.name })) : []).forEach(o => i.artefact.appendChild(el('option', { value: o.v, selected: o.v === t.artefact }, o.l))); artHint.textContent = ''; };
+    const artHint = el('div', { class: 'hint' });
+    i.artefact.onchange = () => { const th = theme(i.theme.value); const a = th && th.artefacts.filter(x => x.name === i.artefact.value)[0]; artHint.textContent = a ? a.focus : ''; };
+    i.theme.onchange = fillArt; fillArt();
+    const revSel = String(t.reviewerIds || '').split(',');
+    const reviewers = A().faculty.filter(f => isTrue(f.active)).map(f => ({ f: f, cb: el('input', { type: 'checkbox', checked: revSel.indexOf(f.id) >= 0 }) }));
+    const pool = A().students.filter(s => isTrue(s.active) && (!s.teamId || s.teamId === t.id));
+    const mems = pool.map(s => ({ s: s, cb: el('input', { type: 'checkbox', checked: !!t.id && s.teamId === t.id }) }));
+    modal({ title: t.id ? 'Edit team' : 'Create team', wide: true, body: el('div', null,
+      el('div', { class: 'grid g2' }, field('Team name', i.name), field('Project title', i.title), field('Theme (Department-restricted)', i.theme), el('div', { class: 'field' }, el('label', { class: 'f' }, 'Engineering artefact'), i.artefact, artHint), field('Guide', i.guide), field('Co-guide', i.co)),
+      el('div', { class: 'grid g2' },
+        el('div', null, el('label', { class: 'f' }, 'Reviewers (additional faculty access)'), el('div', { class: 'info-box', style: { maxHeight: '200px', overflowY: 'auto' } }, reviewers.length ? reviewers.map(r => el('label', { class: 'check' }, r.cb, r.f.name)) : el('span', { class: 'muted' }, 'No faculty yet.'))),
+        el('div', null, el('label', { class: 'f' }, 'Members (unassigned students and current members)'), el('div', { class: 'info-box', style: { maxHeight: '200px', overflowY: 'auto' } }, mems.length ? mems.map(m => el('label', { class: 'check' }, m.cb, m.s.name + ' · ' + m.s.usn)) : el('span', { class: 'muted' }, 'No unassigned students.'))))),
+      actions: [{ label: 'Cancel', fn: c => c() }, { label: 'Save team', cls: 'primary', fn: async c => {
+        try {
+          A().teams = await call('saveTeam', { id: t.id, name: i.name.value, title: i.title.value, themeId: i.theme.value, artefact: i.artefact.value, guideId: i.guide.value, coGuideId: i.co.value,
+            reviewerIds: reviewers.filter(r => r.cb.checked).map(r => r.f.id), memberIds: mems.filter(m => m.cb.checked).map(m => m.s.id), status: t.status });
+          S.admin = await call('adminData'); c(); drawAdmin(); toast('Team saved. Drive evidence folder is ready.', 'ok');
+        } catch (e) { toast(e.message, 'bad'); } } }] });
+  }
+
+  /* ----- Gemini ----- */
+  function admGemini(pane) {
+    const keys = A().keys, st = A().settings;
+    const env = keys.filter(k => k.env)[0];
+    pane.appendChild(el('div', { class: 'alert ' + (env ? 'ok' : 'warn'), style: { marginBottom: '16px' } }, icon('key'), el('div', null,
+      el('b', null, env ? 'Environment key detected (…' + env.last4 + ').' : 'Environment key not set.'), ' ',
+      'Keys are stored only on the server (Apps Script Script Properties) — never in the browser or in Sheets. To use the environment slot: Apps Script editor → Project Settings → Script properties → ', el('span', { class: 'mono' }, 'GEMINI_API_KEY'), '. You can also add extra keys below and assign them to teams.')));
+    const rows = keys.map(k => el('tr', null, el('td', null, el('b', null, k.label), k.env ? el('span', { class: 'badge brand', style: { marginLeft: '6px' } }, 'env') : null, st.defaultKeyId === k.id ? el('span', { class: 'badge ok', style: { marginLeft: '6px' } }, 'Default') : null),
+      el('td', { class: 'mono' }, '••••' + k.last4), el('td', { class: 'mono' }, k.model), el('td', { class: 'tiny' }, k.lastTest || el('span', { class: 'muted' }, 'Not tested')),
+      el('td', null, el('div', { class: 'row', style: { flexWrap: 'nowrap' } },
+        el('button', { class: 'btn sm', onclick: async ev => { const b = ev.currentTarget; busy(b, true, 'Testing…'); try { const r = await call('testKey', { id: k.id }); toast('Connected to ' + r.model + ' in ' + r.ms + ' ms.', 'ok'); S.admin = await call('adminData'); drawAdmin(); } catch (e) { busy(b, false); toast(e.message, 'bad'); } } }, icon('refresh'), 'Test'),
+        el('button', { class: 'btn sm', onclick: () => editKey(k) }, icon('edit'), 'Edit'),
+        !k.env ? el('button', { class: 'btn sm danger', 'aria-label': 'Delete key', onclick: async () => { if (!(await confirmBox('Delete key', 'Delete "' + k.label + '"? Teams using it fall back to the default key.', 'Delete', true))) return; try { A().keys = await call('deleteKey', { id: k.id }); S.admin = await call('adminData'); drawAdmin(); } catch (e) { toast(e.message, 'bad'); } } }, icon('trash')) : null))));
+    pane.appendChild(tableCard('Gemini API keys', el('button', { class: 'btn primary', onclick: () => editKey({}) }, icon('plus'), 'Add key'), ['Label', 'Key', 'Model', 'Last test', ''], rows, 'No keys yet. Set GEMINI_API_KEY in Script properties, or add a key here.'));
+
+    // Defaults
+    const defKey = select([{ v: '', l: env ? 'Environment key (fallback)' : '— none —' }].concat(keys.filter(k => !k.env).map(k => ({ v: k.id, l: k.label }))), st.defaultKeyId || '');
+    const defModel = el('input', { type: 'text', value: st.defaultModel, list: 'models-dl' });
+    const dl = el('datalist', { id: 'models-dl' }, ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-2.5-flash-lite'].map(m => el('option', { value: m })));
+    const limit = el('input', { type: 'number', min: 1, max: 1000, value: st.mentorDailyLimit });
+    const temp = el('input', { type: 'number', min: 0, max: 1.5, step: 0.1, value: st.mentorTemperature });
+    const saveD = el('button', { class: 'btn primary' }, icon('check'), 'Save defaults');
+    saveD.onclick = async () => { busy(saveD, true, 'Saving…'); try { A().settings = await call('saveSettings', { defaultKeyId: defKey.value, defaultModel: defModel.value, mentorDailyLimit: limit.value, mentorTemperature: temp.value }); toast('Saved.', 'ok'); busy(saveD, false); } catch (e) { busy(saveD, false); toast(e.message, 'bad'); } };
+    const loadModels = el('button', { class: 'btn sm' }, icon('refresh'), 'Load available models');
+    loadModels.onclick = async () => { const k = keys[0]; if (!k) { toast('Add a key first.', 'bad'); return; } busy(loadModels, true, 'Loading…'); try { const ms = await call('listModels', { id: defKey.value || k.id }); clear(dl); ms.forEach(m => dl.appendChild(el('option', { value: m.id }, m.label))); toast(ms.length + ' models available — pick from the model field.', 'ok'); } catch (e) { toast(e.message, 'bad'); } busy(loadModels, false); };
+    pane.appendChild(el('div', { class: 'card', style: { marginTop: '18px' } }, el('div', { class: 'card-h' }, el('h3', { style: { flex: 1 } }, 'Mentor defaults'), loadModels),
+      el('div', { class: 'card-b' }, dl, el('div', { class: 'grid g4' }, field('Default key', defKey), field('Default model', defModel), field('Daily messages per team', limit), field('Temperature', temp, 'Lower = more focused')), saveD)));
+
+    // Team assignment
+    const assign = A().teams.filter(t => t.status !== 'Archived').map(t => ({ t: t, k: select([{ v: '', l: 'Default' }].concat(keys.map(k => ({ v: k.id, l: k.label }))), t.apiKeyId || ''), m: el('input', { type: 'text', value: t.model || '', placeholder: 'inherit', list: 'models-dl' }) }));
+    const saveA = el('button', { class: 'btn primary' }, icon('check'), 'Save assignments');
+    saveA.onclick = async () => { busy(saveA, true, 'Saving…'); try { await call('assignKeys', { assignments: assign.map(a => ({ teamId: a.t.id, apiKeyId: a.k.value, model: a.m.value })) }); S.admin = await call('adminData'); toast('Assignments saved.', 'ok'); busy(saveA, false); } catch (e) { busy(saveA, false); toast(e.message, 'bad'); } };
+    pane.appendChild(el('div', { style: { marginTop: '18px' } }, tableCard('Assign keys & models to teams', saveA, ['Team', 'Theme', 'API key', 'Model override'],
+      assign.map(a => el('tr', null, el('td', null, el('b', null, a.t.name)), el('td', null, el('span', { class: 'badge brand' }, a.t.themeId)), el('td', { style: { minWidth: '180px' } }, a.k), el('td', { style: { minWidth: '180px' } }, a.m))), 'No active teams.')));
+  }
+  function editKey(k) {
+    const label = el('input', { type: 'text', value: k.label || '', disabled: !!k.env }), key = el('input', { type: 'password', autocomplete: 'off', placeholder: k.id ? 'Leave blank to keep the current key' : 'Paste Gemini API key' }),
+      model = el('input', { type: 'text', value: k.model || A().settings.defaultModel, list: 'models-dl' });
+    modal({ title: k.id ? 'Edit key' : 'Add Gemini API key', body: el('div', null,
+      field('Label', label, 'e.g. "Department key 1" or "Theme 1 teams"'), k.env ? el('div', { class: 'alert', style: { marginBottom: '14px' } }, 'The environment key value is changed in Project Settings → Script properties.') : field('API key', key, 'Sent once over HTTPS and stored in Script Properties. It is never shown again or sent to any browser.'), field('Preferred model', model)),
+      actions: [{ label: 'Cancel', fn: c => c() }, { label: 'Save', cls: 'primary', fn: async c => {
+        try { if (k.id) await call('updateKey', { id: k.id, label: label.value, model: model.value, key: key.value }); else await call('addKey', { label: label.value, key: key.value, model: model.value });
+          key.value = ''; S.admin = await call('adminData'); c(); drawAdmin(); toast('Key saved.', 'ok'); } catch (e) { toast(e.message, 'bad'); } } }] });
+  }
+
+  async function reloadBoot() { const b = await call('bootstrap'); S.boot.stages = b.stages; S.boot.settings = b.settings; }
+
+  /* ----- Settings ----- */
+  function admSettings(pane) {
+    const st = A().settings;
+    const i = { gates: el('input', { type: 'checkbox', checked: st.enforceGates }), marks: el('input', { type: 'checkbox', checked: st.showMarksToStudents }), otp: el('input', { type: 'checkbox', checked: st.allowOtpLogin }) };
+    const save = el('button', { class: 'btn primary' }, icon('check'), 'Save settings');
+    save.onclick = async () => { busy(save, true, 'Saving…'); try { A().settings = await call('saveSettings', { enforceGates: i.gates.checked, showMarksToStudents: i.marks.checked, allowOtpLogin: i.otp.checked }); await reloadBoot(); toast('Saved.', 'ok'); } catch (e) { toast(e.message, 'bad'); } busy(save, false); };
+    pane.appendChild(el('div', { class: 'grid g2' },
+      el('div', { class: 'card' }, el('div', { class: 'card-h' }, el('h3', null, 'Portfolio rules')), el('div', { class: 'card-b' },
+        el('label', { class: 'check' }, i.gates, el('span', null, el('b', null, 'Enforce review hard gates'), el('div', { class: 'small muted' }, 'Handbook 7.2: S6 and S7 stay locked for students until Review 3 is cleared.'))),
+        el('label', { class: 'check' }, i.marks, el('span', null, el('b', null, 'Show marks to students'), el('div', { class: 'small muted' }, 'Decisions and feedback are always visible; marks only when enabled.'))),
+        el('label', { class: 'check' }, i.otp, el('span', null, el('b', null, 'Allow email-code sign-in'), el('div', { class: 'small muted' }, 'Fallback for users whose Google identity is not shared with the app (e.g. personal Gmail).'))),
+        el('div', { style: { marginTop: '12px' } }, save))),
+      el('div', { class: 'card' }, el('div', { class: 'card-h' }, el('h3', null, 'Department & backend')), el('div', { class: 'card-b' },
+        el('p', null, el('b', null, 'Department: '), S.boot.dept.name, el('span', { class: 'badge', style: { marginLeft: '6px' } }, 'fixed in code')),
+        el('p', null, el('b', null, 'Institution: '), S.boot.dept.institution), el('p', null, el('b', null, 'Course: '), S.boot.dept.course + ', ' + S.boot.dept.semester + ', AY ' + S.boot.dept.academicYear),
+        el('p', null, el('b', null, 'Administrator (script owner): '), A().owner),
+        el('p', null, el('a', { href: A().links.spreadsheet, target: '_blank', rel: 'noopener noreferrer' }, icon('file'), ' Backend spreadsheet (read-only reference)')),
+        el('p', null, el('a', { href: A().links.folder, target: '_blank', rel: 'noopener noreferrer' }, icon('folder'), ' Portfolio Drive folder'))))));
+  }
+
+  /* ----- Audit ----- */
+  async function admAudit(pane) {
+    pane.appendChild(loader('Loading audit log…'));
+    try {
+      const rows = await call('auditLog');
+      clear(pane).appendChild(tableCard('Recent activity (last 300)', null, ['When', 'User', 'Role', 'Action', 'Team', 'Detail'],
+        rows.map(r => el('tr', null, el('td', { class: 'tiny' }, fmt(r.at)), el('td', { class: 'small' }, r.email), el('td', null, el('span', { class: 'badge' }, r.role)), el('td', { class: 'mono' }, r.action), el('td', { class: 'small' }, teamName(r.teamId)), el('td', { class: 'small', style: { maxWidth: '420px', wordBreak: 'break-word' } }, r.detail)))));
+    } catch (e) { clear(pane).appendChild(el('div', { class: 'alert bad' }, e.message)); }
+  }
+
+  /* ==========================================================================
+   * 13. Handbook reference
+   * ======================================================================== */
+  function viewHandbook() {
+    setTitle('Handbook');
+    const B = S.boot, c = clear(contentEl);
+    c.appendChild(el('div', { class: 'hero', style: { marginBottom: '18px' } }, el('div', { class: 'kicker' }, B.dept.course + ' Handbook · ' + B.dept.handbookVersion), el('h1', { style: { marginTop: '6px' } }, B.dept.cycleName),
+      el('p', null, 'Six themes · seven stages · guided-thinking worksheets per stage. Each stage produces a specific, dateable artefact of evidence; no stage may be skipped or back-filled.')));
+    c.appendChild(el('div', { class: 'card', style: { marginBottom: '18px' } }, el('div', { class: 'card-h' }, el('h3', null, 'Stages & worksheets')), el('div', { class: 'card-b' },
+      el('div', { class: 'flow' }, stageList().map((s, i) => [i ? el('span', { class: 'a' }, '→') : null, el('span', { class: 'b' }, s.code)])),
+      el('div', { class: 'tbl-wrap', style: { marginTop: '10px' } }, el('table', { class: 't' }, el('thead', null, el('tr', null, el('th', null, 'Stage'), el('th', null, 'What it requires'), el('th', null, 'Due'))),
+        el('tbody', null, stageList().map(s => el('tr', null, el('td', null, el('span', { class: 'badge brand mono' }, s.code), el('div', { style: { fontWeight: 600, marginTop: '4px' } }, s.title)), el('td', { class: 'small selectable' }, s.purpose), el('td', { class: 'small' }, s.due)))))))));
+    c.appendChild(el('h2', { style: { margin: '6px 0 12px' } }, 'Themes & engineering artefacts'));
+    c.appendChild(el('div', { class: 'grid g2', style: { marginBottom: '18px' } }, B.themes.map(t => el('div', { class: 'card' }, el('div', { class: 'card-h' }, el('span', { class: 'badge brand' }, t.id), el('h3', { style: { flex: 1 } }, t.name), el('span', { class: 'badge' }, 'Min ' + t.minFR + ' FRs')),
+      el('div', { class: 'card-b selectable' }, el('p', { class: 'small' }, el('i', null, t.subtitle)), el('div', { class: 'row', style: { marginBottom: '8px' } }, t.focus.map(f => el('span', { class: 'badge' }, f))),
+        el('b', { class: 'small' }, 'Artefacts'), el('ul', { class: 'small', style: { margin: '4px 0 8px', paddingLeft: '18px' } }, t.artefacts.map(a => el('li', null, el('b', null, a.name), ' — ', a.focus))),
+        el('details', null, el('summary', { class: 'small', style: { cursor: 'pointer', color: 'var(--brand)' } }, 'Courses, SFD blocks & S3 measurements'),
+          el('p', { class: 'small', style: { marginTop: '6px' } }, el('b', null, 'Courses: '), t.courses.join(' · ')),
+          el('div', { class: 'flow' }, t.sfdBlocks.map((b, i) => [i ? el('span', { class: 'a' }, '→') : null, el('span', { class: 'b' }, b)])),
+          el('ul', { class: 'small', style: { paddingLeft: '18px' } }, t.s3Params.map(p => el('li', null, p.p + ' — ' + p.m)))))))));
+    c.appendChild(el('div', { class: 'grid g2' },
+      el('div', { class: 'card' }, el('div', { class: 'card-h' }, el('h3', null, 'Reviews, marks & gates (Ch. 7)')), el('div', { class: 'card-b' },
+        B.reviews.map(r => el('div', { style: { marginBottom: '12px' } }, el('div', { class: 'row' }, el('b', null, r.name), el('span', { class: 'badge brand' }, r.marks), el('span', { class: 'badge' }, r.timing)), el('ul', { class: 'small', style: { margin: '4px 0', paddingLeft: '18px' } }, r.gate.map(g => el('li', null, g))))),
+        B.extraMarks.map(x => el('div', { class: 'small' }, el('b', null, x.name + ': '), x.marks + ' marks · ' + x.timing)))),
+      el('div', { class: 'card' }, el('div', { class: 'card-h' }, el('h3', null, 'Rubric (Ch. 5) & Five Lenses')), el('div', { class: 'card-b' },
+        el('div', { class: 'tbl-wrap' }, el('table', { class: 't' }, el('thead', null, el('tr', null, el('th', null, 'Component'), el('th', null, 'Marks'))), el('tbody', null, B.rubric.map(r => el('tr', null, el('td', null, r.name), el('td', null, r.marks)))))),
+        el('div', { style: { marginTop: '14px' } }, B.lenses.map(l => el('div', { class: 'small', style: { marginBottom: '6px' } }, el('b', null, l.n + '. ' + l.name + ' — '), l.q)))))));
+    c.appendChild(el('div', { class: 'card', style: { marginTop: '18px' } }, el('div', { class: 'card-h' }, el('h3', null, 'Course philosophy')), el('div', { class: 'card-b' }, el('ul', { class: 'small selectable', style: { paddingLeft: '18px', margin: 0 } }, B.principles.map(p => el('li', { style: { marginBottom: '4px' } }, p))))));
+  }
+
+  /* ==========================================================================
+   * 14. Start
+   * ======================================================================== */
+  boot();
+})();
+</script>
