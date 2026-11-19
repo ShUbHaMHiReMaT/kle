@@ -29,7 +29,7 @@ const SCHEMA = {
   Evidence:  ['id', 'teamId', 'stageId', 'sectionId', 'fileId', 'name', 'mimeType', 'size', 'url', 'caption', 'uploadedBy', 'uploadedAt', 'deleted'],
   Comments:  ['id', 'teamId', 'stageId', 'sectionId', 'authorEmail', 'authorName', 'role', 'text', 'createdAt'],
   Reviews:   ['id', 'teamId', 'reviewId', 'facultyEmail', 'facultyName', 'gateJson', 'bandsJson', 'lensNotes', 'marks', 'decision', 'comment', 'extraJson', 'createdAt', 'updatedAt'],
-  MentorLog: ['id', 'teamId', 'stageId', 'mode', 'userEmail', 'userName', 'role', 'text', 'model', 'createdAt', 'facultyNote', 'noteBy'],
+  MentorLog: ['id', 'teamId', 'stageId', 'mode', 'userEmail', 'userName', 'role', 'text', 'model', 'createdAt', 'facultyNote', 'noteBy', 'score'],
   Audit:     ['at', 'email', 'role', 'action', 'teamId', 'detail']
 };
 
@@ -70,7 +70,10 @@ function ensureSetup_() {
   // version changes, refresh the stage definitions. Saved records are keyed by section id and kept.
   if (PROP.getProperty('STRUCTURE_VERSION') !== STRUCTURE_VERSION) {
     PROP.setProperty('STRUCTURE_VERSION', STRUCTURE_VERSION);   // set first: prevents re-entry
-    try { syncHandbookStages_(true); } catch (e) { PROP.deleteProperty('STRUCTURE_VERSION'); throw e; }
+    try {
+      syncHandbookStages_(true);
+      Object.keys(SCHEMA).forEach(n => ensureSheet_(ss_(), n, SCHEMA[n]));   // add any new columns, keep data
+    } catch (e) { PROP.deleteProperty('STRUCTURE_VERSION'); throw e; }
   }
 }
 
@@ -578,7 +581,7 @@ function getTeam_(ctx, teamId) {
     members: members, records: records, evidence: evidence, comments: comments, reviews: reviews,
     progress: progress_(team, stages, recs, evs, membersRaw),
     debugCycles: debugCycles_(recs), flags: integrityFlags_(recs),
-    gates: gateStatus_(teamId), canEdit: ctx.role === 'student' || ctx.role === 'admin', me: ctx.email
+    gates: gateStatus_(teamId), aiScores: aiScores_(teamId), canEdit: ctx.role === 'student' || ctx.role === 'admin', me: ctx.email
   };
 }
 function safeJson_(s, d) { try { return s ? JSON.parse(s) : d; } catch (e) { return d; } }
@@ -969,6 +972,7 @@ function mentorSystem_(team, theme, stage, mode) {
   lines.push('The course follows the department handbook "' + DEPARTMENT.cycleName + '" (' + DEPARTMENT.handbookVersion + ').');
   lines.push('\nYOUR ROLE: a Socratic engineering mentor for a student team. Build understanding of foundational courses (Power Electronics, Electrical Machines, Analog Circuit Design, EDC, BEE, Signals & Systems, Control Systems, Microcontrollers) through questions.');
   lines.push('RULES:\n- Ask 1–3 focused technical or foundational questions per turn, tied to the team\'s current stage and their saved records.\n- Never fill in worksheet values, never produce final component values, gains, thresholds or predictions for them, and never write report text for submission. The blank cells are the point of the course. If asked for answers, explain the governing principle and ask a guiding question instead.\n- You may explain concepts and equations in general form, check their reasoning, point out missing units, missing measurement methods, nominal-vs-measured confusion, broken traceability (FR → S2 block → S3 measurement → S4 calculation → S5-PRE prediction → S7 result).\n- Insist on measurement: "It works" is not an EEE sentence. Predictions must be recorded before measurement.\n- Use the Five Lenses when probing: (1) Which FR? (2) Which S2 block and which course taught its equation? (3) Show the driving calculation (4) Predicted vs measured and which parameter explains the gap (5) What failed and how was the root cause traced?\n- Remind about lab safety when relevant (mains-connected TRIAC/PFC work: isolation transformer, isolated probes; Li-ion cells: current limits, fusing).\n- Be concise (under 250 words), friendly and specific. Plain text with simple markdown (bold, bullet lists). End with your question(s).');
+  lines.push('GROUNDING: Your only reference is the department handbook content given in this prompt. Base every judgement, requirement and score on it, cite the handbook part (e.g. "Handbook Ch.8, S3 Part B") when you state a requirement, and say so if the handbook does not cover something. Do not use other curricula or standards as requirements.');
   lines.push('\nHANDBOOK PRINCIPLES:\n- ' + HANDBOOK_PRINCIPLES.join('\n- '));
   if (theme) {
     lines.push('\nTEAM THEME: ' + theme.id + ' — ' + theme.name + '. Academic subtitle: ' + theme.subtitle);
@@ -983,20 +987,50 @@ function mentorSystem_(team, theme, stage, mode) {
     lines.push('Theme competency expectations: ' + Object.keys(theme.map).map(k => k + ': ' + theme.map[k]).join(' | '));
     lines.push('Minimum FRs: ' + theme.minFR + '.');
   }
-  if (stage) {
-    lines.push('\nCURRENT STAGE: ' + stage.code + ' — ' + stage.title + ' (due: ' + stage.due + ').\nStage requirement: ' + stage.purpose);
-    lines.push('Stage worksheet sections: ' + (stage.sections || []).map(s => s.title).join('; '));
-    const rv = REVIEWS.filter(r => r.id === stage.review)[0];
-    if (rv) lines.push('Review gate (' + rv.name + '): ' + rv.gate.join('; '));
-  }
+  if (stage) lines.push('\n' + handbookStageText_(stage, theme));
   const modes = {
     mentor: 'MODE: open mentoring conversation. Respond to the student and guide with questions.',
     questions: 'MODE: foundational quiz. Ask the student 3 numbered questions (one foundational concept, one about their own records/numbers, one "what if" design question) for this stage. Wait for answers; on the next turn give feedback on each answer, then ask follow-ups.',
-    review: 'MODE: record critique. Compare the team\'s saved records for this stage with the handbook requirements. List up to 5 specific gaps (missing units, untestable FRs, nominal values, missing traceability, missing dates/sign-off), without supplying the missing values, then ask what they will do about the most important gap.',
+    review: 'MODE: HANDBOOK SCORE OUT OF 10. Judge ONLY the team\'s saved records for the CURRENT STAGE, ONLY against the HANDBOOK REQUIREMENTS FOR THIS STAGE given above (worksheet parts, minimum rows, sign-off, rubric band descriptors, gate criteria). Do not use outside standards and do not invent requirements. '
+      + 'Scale (handbook Ch.5 performance bands): Exemplary 9–10 (91–100%), Competent 7–8 (71–90%), Developing 4–6 (41–70%), Inadequate 0–3 (<40%). Empty or missing records for the stage = 0–1. Missing numbers/units, missing measurement methods or sources, nominal instead of measured values, broken traceability or missing sign-off must lower the score. Never inflate; use whole or half points. '
+      + 'Reply in EXACTLY this format:\n**Handbook score: X/10** — <band name>\n**What the handbook requires for this stage**\n- 3 to 5 bullets, each citing the handbook part (e.g. "Handbook Ch.8, S1 Part B")\n**Assessment against the handbook**\n- one line per worksheet part: ✓ / ✗ + short evidence quoted from their records\n**Top gaps to fix next** (max 3, each citing the handbook part; never give the missing values)\n**Question for you**\n- one probing Five-Lens question.',
     viva: 'MODE: mock individual viva using the Five Lenses. Ask ONE lens question at a time about the student\'s own S2 block; after each answer, give brief feedback on its strength and ask the next lens question.'
   };
   lines.push('\n' + (modes[mode] || modes.mentor));
   return lines.join('\n');
+}
+
+/** Everything the handbook says about one stage, for the AI Mentor (no outside sources). */
+function handbookStageText_(stage, theme) {
+  const L = [];
+  L.push('HANDBOOK REQUIREMENTS FOR THIS STAGE (' + DEPARTMENT.cycleName + ', Handbook Ch.4 & Ch.8 worksheet ' + stage.code + ')');
+  L.push('Stage ' + stage.code + ' — ' + stage.title + ' · due: ' + stage.due + '.');
+  L.push('Requirement: ' + stage.purpose);
+  (stage.sections || []).forEach(sec => {
+    if (sec.type === 'info') return;
+    let line = '- ' + sec.title + (sec.individual ? ' [individual — each member writes their own]' : '') + (sec.lock ? ' [must be signed & dated: ' + (sec.lock.label || 'sign-off') + ']' : '');
+    if (sec.desc) line += ' — ' + sec.desc;
+    if (sec.type === 'table') {
+      const mr = sec.minRows === 'theme:minFR' ? (theme ? theme.minFR : 5) : Number(sec.minRows || 0);
+      line += ' | table columns: ' + (sec.columns || []).map(c => c.label + (c.post ? ' (filled after test)' : '')).join(' · ') + (mr ? ' | minimum ' + mr + ' completed rows' : '');
+    } else if (sec.type === 'fields') {
+      line += ' | prompts: ' + (sec.fields || []).filter(f => f.type !== 'info').map(f => f.label).join(' · ');
+      if (sec.minSentences) line += ' | at least ' + sec.minSentences + ' sentences each';
+    } else if (sec.type === 'evidence') line += ' | evidence upload expected';
+    L.push(line);
+  });
+  const comp = RUBRIC.filter(r => r.id === stage.rubric)[0];
+  if (comp) {
+    L.push('RUBRIC COMPONENT (Handbook Ch.5.3): ' + comp.name + ' — ' + comp.marks + ' marks.');
+    L.push('  Exemplary (91–100%): ' + (theme && theme.map[comp.id] ? theme.map[comp.id] : 'all elements complete, traceable and measured.'));
+    L.push('  Competent (71–90%): ' + comp.C);
+    L.push('  Developing (41–70%): ' + comp.D);
+    L.push('  Inadequate (<40%): ' + comp.I);
+  }
+  const rv = REVIEWS.filter(r => r.id === stage.review)[0];
+  if (rv) L.push('REVIEW GATE (Handbook Ch.7.2) ' + rv.name + ' [' + rv.marks + ' marks, ' + rv.timing + ']: ' + rv.gate.join('; ') + '.');
+  L.push('FIVE LENSES (Handbook Ch.7.3): ' + LENSES.map(l => l.n + '. ' + l.name + ': ' + l.q).join(' '));
+  return L.join('\n');
 }
 
 function teamContextText_(team, stageId, ctx) {
@@ -1069,17 +1103,31 @@ function mentorChat_(ctx, a) {
   const reply = callGemini_(key, model, system, contents, Number(s.mentorTemperature || 0.6), 8192);
   const t = now_();
   const u = { id: uid_('mu'), teamId: team.id, stageId: a.stageId || '', mode: mode, userEmail: ctx.email, userName: ctx.name, role: 'user', text: msg, model: model, createdAt: t };
-  const r = { id: uid_('mr'), teamId: team.id, stageId: a.stageId || '', mode: mode, userEmail: ctx.email, userName: 'AI Mentor', role: 'model', text: reply, model: model, createdAt: new Date(Date.now() + 1).toISOString() };
+  const r = { id: uid_('mr'), teamId: team.id, stageId: a.stageId || '', mode: mode, userEmail: ctx.email, userName: 'AI Mentor', role: 'model', text: reply, model: model, createdAt: new Date(Date.now() + 1).toISOString(), score: parseScore_(reply) };
   insert_('MentorLog', u); insert_('MentorLog', r);
   return { user: u, reply: r, usedToday: usedToday + 1, limit: s.mentorDailyLimit };
 }
 
+function parseScore_(text) {
+  const m = String(text || '').match(/handbook\s*score\s*:?\s*\**\s*(\d+(?:\.\d+)?)\s*\/\s*10/i);
+  if (!m) return '';
+  const v = Math.max(0, Math.min(10, Number(m[1])));
+  return isNaN(v) ? '' : String(Math.round(v * 2) / 2);
+}
+/** Latest AI handbook score per stage for a team. */
+function aiScores_(teamId) {
+  const out = {};
+  where_('MentorLog', 'teamId', teamId).filter(m => m.role === 'model' && m.score !== '' && m.score !== undefined)
+    .sort((x, y) => String(x.createdAt) < String(y.createdAt) ? -1 : 1)
+    .forEach(m => { out[m.stageId] = { score: Number(m.score), at: m.createdAt }; });
+  return out;
+}
 function mentorHistory_(ctx, a) {
   const team = teamAccess_(ctx, a.teamId, 'read');
   return where_('MentorLog', 'teamId', team.id)
     .sort((x, y) => String(x.createdAt) < String(y.createdAt) ? -1 : 1)
     .slice(-Math.min(Number(a.limit) || 200, 500))
-    .map(m => ({ id: m.id, stageId: m.stageId, mode: m.mode, userName: m.userName, userEmail: m.userEmail, role: m.role, text: m.text, model: m.model, createdAt: m.createdAt, facultyNote: m.facultyNote, noteBy: m.noteBy }));
+    .map(m => ({ id: m.id, stageId: m.stageId, mode: m.mode, userName: m.userName, userEmail: m.userEmail, role: m.role, text: m.text, model: m.model, createdAt: m.createdAt, facultyNote: m.facultyNote, noteBy: m.noteBy, score: m.score }));
 }
 function mentorNote_(ctx, a) {
   const m = one_('MentorLog', 'id', a.id);

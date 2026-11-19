@@ -26,8 +26,8 @@
         (ctrl && ['u', 's', 'p'].indexOf(k) >= 0);
       if (block) { e.preventDefault(); e.stopPropagation(); return false; }
     }, true);
-    // No selecting / copying / dragging of page content (form fields still work)
-    ['selectstart', 'copy', 'cut', 'dragstart'].forEach(ev => document.addEventListener(ev, e => { if (!isField(e.target)) e.preventDefault(); }, true));
+    // No selecting / dragging of page content (form fields still work)
+    ['selectstart', 'dragstart'].forEach(ev => document.addEventListener(ev, e => { if (!isField(e.target) || (noPaste && !exempt(e.target))) e.preventDefault(); }, true));
     // DevTools detection: a paused debugger statement indicates an open inspector.
     const shield = () => document.getElementById('shield');
     setInterval(function () {
@@ -37,18 +37,62 @@
       const open = performance.now() - t > 120;
       const s = shield(); if (s) s.classList.toggle('on', open);
     }, 1500);
-    // No pasting for students: worksheets must be typed in their own words.
+    // ---- No copy / paste for students: worksheets must be typed in their own words. ----
     // Fields marked data-allowpaste (website link, evidence link, API key) are exempt.
+    // Layers: (1) paste/drop/copy/cut events  (2) beforeinput paste types  (3) keyboard shortcuts
+    //         (4) "burst" guard — any single input that inserts more than MAX_BURST characters at once
+    //             (mobile clipboard bar, Gboard/SwiftKey clipboard chips, autofill of clipboard text) is undone.
     let noPaste = false, lastWarn = 0;
-    const pasteBlocked = t => noPaste && isField(t) && !(t.closest && t.closest('[data-allowpaste]'));
-    const warn = () => { const n = Date.now(); if (n - lastWarn > 2500) { lastWarn = n; toast('Pasting is not allowed — please type your answer in your own words.', 'bad'); } };
-    const stop = e => { if (pasteBlocked(e.target)) { e.preventDefault(); e.stopPropagation(); warn(); } };
-    document.addEventListener('paste', stop, true);
-    document.addEventListener('drop', stop, true);
-    document.addEventListener('beforeinput', e => { if (/^insertFrom(Paste|Drop|PasteAsQuotation|YankRing)$/.test(e.inputType || '')) stop(e); }, true);
+    const MAX_BURST = 18;
+    const exempt = t => !!(t && t.closest && t.closest('[data-allowpaste]'));
+    const pasteBlocked = t => noPaste && isField(t) && !exempt(t);
+    const texty = t => !!t && (t.tagName === 'TEXTAREA' || (t.tagName === 'INPUT' && /^(text|search|email|url|tel|password)?$/i.test(t.getAttribute('type') || '')));
+    const warn = msg => { const n = Date.now(); if (n - lastWarn > 2000) { lastWarn = n; toast(msg || 'Pasting is not allowed — please type your answer in your own words.', 'bad'); } };
+    const stop = (e, msg) => { e.preventDefault(); e.stopImmediatePropagation(); warn(msg); };
+    document.addEventListener('paste', e => { if (pasteBlocked(e.target)) stop(e); }, true);
+    document.addEventListener('drop', e => { if (pasteBlocked(e.target)) stop(e); }, true);
+    // copy / cut: blocked everywhere for students; outside fields for everyone else
+    ['copy', 'cut'].forEach(ev => document.addEventListener(ev, e => {
+      if (noPaste ? !exempt(e.target) : !isField(e.target)) stop(e, noPaste ? 'Copying is disabled in the portfolio.' : null);
+    }, true));
+    document.addEventListener('keydown', e => {
+      if (!noPaste) return;
+      const k = (e.key || '').toLowerCase(), ctrl = e.ctrlKey || e.metaKey;
+      const pasteKey = (ctrl && k === 'v') || (e.shiftKey && k === 'insert');
+      const copyKey = (ctrl && (k === 'c' || k === 'x' || k === 'insert')) || (e.shiftKey && k === 'delete');
+      if ((pasteKey || copyKey) && !exempt(e.target)) stop(e, pasteKey ? null : 'Copying is disabled in the portfolio.');
+    }, true);
+    // remember value + selection just before each change, so a paste-like burst can be undone
+    const snap = new WeakMap();
+    const take = t => { try { snap.set(t, { v: t.value, s: t.selectionStart, e: t.selectionEnd }); } catch (x) { snap.set(t, { v: t.value, s: null, e: null }); } };
+    document.addEventListener('focusin', e => { if (pasteBlocked(e.target) && texty(e.target)) take(e.target); }, true);
+    document.addEventListener('beforeinput', e => {
+      if (!pasteBlocked(e.target)) return;
+      if (/^insertFrom(Paste|Drop|PasteAsQuotation|YankRing)$/.test(e.inputType || '')) { stop(e); return; }
+      if ((e.inputType === 'insertText' || e.inputType === 'insertReplacementText') && e.data && e.data.length > MAX_BURST) { stop(e); return; }
+      if (texty(e.target)) take(e.target);
+    }, true);
+    document.addEventListener('input', e => {
+      const t = e.target;
+      if (!pasteBlocked(t) || !texty(t) || /^(delete|history)/.test(e.inputType || '')) { if (pasteBlocked(t) && texty(t)) take(t); return; }
+      const prev = snap.get(t);
+      if (prev) {
+        const removed = (prev.s !== null && prev.e !== null) ? Math.max(0, prev.e - prev.s) : 0;
+        const inserted = t.value.length - (prev.v.length - removed);
+        if (inserted > MAX_BURST) {
+          t.value = prev.v;
+          try { if (prev.s !== null) t.setSelectionRange(prev.s, prev.s); } catch (x) { /* date/number inputs */ }
+          stop(e);
+          return;
+        }
+      }
+      take(t);
+    }, true);
     // Keep the console empty
     try { const noop = function () {}; ['log', 'info', 'warn', 'debug', 'table', 'dir'].forEach(m => { console[m] = noop; }); } catch (e) { /* ignore */ }
-    return { isField: isField, setNoPaste: v => { noPaste = !!v; } };
+    // Older Android keyboards / WebViews send clipboard text through the legacy textInput event
+    document.addEventListener('textInput', e => { if (pasteBlocked(e.target) && texty(e.target) && e.data && e.data.length > MAX_BURST) stop(e); }, true);
+    return { isField: isField, setNoPaste: v => { noPaste = !!v; document.body.classList.toggle('no-copy', noPaste); } };
   })();
 
   /* ==========================================================================
@@ -197,6 +241,12 @@
   function loader(text) { return el('div', { class: 'loader' }, el('div', { class: 'spin' }), el('div', null, text || 'Loading…')); }
   function ring(p) { const r = el('div', { class: 'ring' }, el('span', null, Math.round(p) + '%')); r.style.setProperty('--p', p); return r; }
   function bar(p) { return el('div', { class: 'progress' }, el('i', { style: { width: Math.max(0, Math.min(100, p)) + '%' } })); }
+  function scoreBadge(v) {
+    const n = Number(v);
+    const cls = n >= 9 ? 'ok' : n >= 7 ? 'brand' : n >= 4 ? 'warn' : 'bad';
+    const band = n >= 9 ? 'Exemplary' : n >= 7 ? 'Competent' : n >= 4 ? 'Developing' : 'Inadequate';
+    return el('span', { class: 'badge ' + cls, title: 'AI Mentor score against the handbook rubric (Ch.5 bands)' }, icon('star'), ' AI handbook score ' + n + '/10 · ' + band);
+  }
   function decisionBadge(d) { return d === 'Cleared' ? el('span', { class: 'badge ok dot' }, 'Cleared') : d === 'Not cleared' ? el('span', { class: 'badge bad dot' }, 'Not cleared') : d === 'In progress' ? el('span', { class: 'badge warn dot' }, 'In progress') : el('span', { class: 'badge' }, 'Pending'); }
 
   /* ==========================================================================
@@ -523,7 +573,8 @@
     main.appendChild(el('div', { class: 'card', style: { marginBottom: '18px' } }, el('div', { class: 'card-b' },
       el('div', { class: 'row' }, el('span', { class: 'badge brand mono' }, stage.code), el('h2', { style: { flex: 1 } }, stage.title)),
       el('div', { class: 'row small muted', style: { margin: '8px 0 10px' } },
-        el('span', null, '⏱ ', stage.due || '—'), rv ? el('span', null, '· ', rv.name) : null, rub ? el('span', null, '· Rubric: ' + rub.name + ' (' + rub.marks + ')') : null),
+        el('span', null, '⏱ ', stage.due || '—'), rv ? el('span', null, '· ', rv.name) : null, rub ? el('span', null, '· Rubric: ' + rub.name + ' (' + rub.marks + ')') : null,
+        (S.team.aiScores || {})[stage.id] ? scoreBadge(S.team.aiScores[stage.id].score) : null),
       el('p', { style: { margin: 0 } }, stage.purpose))));
     const fb = S.team.reviews.filter(r => r.reviewId === stage.review && (r.comment || r.decision))[0];
     if (fb) main.appendChild(el('div', { class: 'alert ' + (fb.decision === 'Cleared' ? 'ok' : fb.decision === 'Not cleared' ? 'bad' : ''), style: { marginBottom: '18px', display: 'block' } },
@@ -939,6 +990,11 @@
       pane.appendChild(card);
     });
 
+    const ai = T.aiScores || {};
+    const aiRows = stageList().filter(st => ai[st.id]).map(st => el('tr', null, el('td', null, el('span', { class: 'badge brand mono' }, st.code), ' ', st.title), el('td', null, scoreBadge(ai[st.id].score)), el('td', { class: 'tiny muted' }, fmt(ai[st.id].at))));
+    pane.appendChild(el('div', { class: 'card', style: { marginBottom: '18px' } }, el('div', { class: 'card-h' }, icon('bot'), el('h3', { style: { flex: 1 } }, 'AI Mentor handbook scores (latest per stage)')),
+      el('div', { class: 'card-b' }, aiRows.length ? el('div', { class: 'tbl-wrap' }, el('table', { class: 't' }, el('thead', null, el('tr', null, el('th', null, 'Stage'), el('th', null, 'Score'), el('th', null, 'When'))), el('tbody', null, aiRows))) : el('p', { class: 'muted', style: { margin: 0 } }, 'No AI scores yet. In AI Mentor choose “Score my stage /10 (handbook rubric)”.'),
+        el('p', { class: 'tiny muted', style: { margin: '8px 0 0' } }, 'Advisory only — the AI scores saved records against the handbook rubric bands (9–10 Exemplary · 7–8 Competent · 4–6 Developing · 0–3 Inadequate). Marks are awarded by faculty.'))));
     pane.appendChild(el('div', { class: 'card' }, el('div', { class: 'card-h' }, el('h3', null, "The Reviewer's Five Lenses (Handbook 7.3)")),
       el('div', { class: 'card-b' }, S.boot.lenses.map(l => el('div', { style: { marginBottom: '10px' } }, el('b', null, l.n + '. ' + l.name), el('div', { class: 'small' }, l.q))))));
   }
@@ -977,7 +1033,7 @@
     const canChat = u.role === 'student' || u.role === 'admin';
     const stages = stageList();
     const stageSel = select(stages.map(s => ({ v: s.id, l: s.code + ' — ' + s.title })), S.stageId || (stages[0] || {}).id);
-    const modeSel = select([{ v: 'mentor', l: 'Mentoring conversation' }, { v: 'questions', l: 'Ask me foundational questions' }, { v: 'review', l: 'Critique my saved records' }, { v: 'viva', l: 'Mock viva — Five Lenses' }], 'mentor');
+    const modeSel = select([{ v: 'mentor', l: 'Mentoring conversation' }, { v: 'questions', l: 'Ask me foundational questions' }, { v: 'review', l: 'Score my stage /10 (handbook rubric)' }, { v: 'viva', l: 'Mock viva — Five Lenses' }], 'mentor');
     const filter = u.role !== 'student' ? select([{ v: '', l: 'All stages' }].concat(stages.map(s => ({ v: s.id, l: s.code }))), '') : null;
     const log = el('div', { class: 'chat-log', 'aria-live': 'polite' });
     const input = el('textarea', { placeholder: 'Ask about your design, a concept, or request questions… (Enter to send, Shift+Enter for a new line)', rows: 2, disabled: !canChat });
@@ -988,6 +1044,7 @@
       const isUser = m.role === 'user';
       const node = el('div', { class: 'msg ' + (isUser ? 'user' : 'model') },
         el('div', { class: 'meta' }, (isUser ? m.userName : 'AI Mentor') + ' · ' + (stages.filter(s => s.id === m.stageId)[0] || {}).code + ' · ' + fmt(m.createdAt)),
+        !isUser && m.score !== '' && m.score !== undefined && m.score !== null ? el('div', null, scoreBadge(m.score)) : null,
         isUser ? el('div', { class: 'b selectable' }, m.text) : el('div', { class: 'b selectable', html: md(m.text) }),
         m.facultyNote ? el('div', { class: 'note' }, '📝 ' + (m.noteBy || 'Faculty') + ': ' + m.facultyNote) : null);
       if (!isUser && (u.role === 'faculty' || isStaff())) {
@@ -1020,6 +1077,7 @@
       try {
         const r = await call('mentorChat', { teamId: T.team.id, stageId: stageSel.value, mode: modeSel.value, message: msg });
         S.mentor.pop(); S.mentor.push(r.user, r.reply);
+        if (r.reply.score !== '' && r.reply.score !== undefined) { S.team.aiScores = S.team.aiScores || {}; S.team.aiScores[r.reply.stageId] = { score: Number(r.reply.score), at: r.reply.createdAt }; }
         usage.textContent = r.usedToday + ' / ' + r.limit + ' team messages today';
       } catch (e) { S.mentor.pop(); input.value = msg; toast(e.message, 'bad'); }
       busy(send, false); drawLog(); input.focus();
@@ -1161,17 +1219,24 @@
           el('td', null, isTrue(x.active) ? el('span', { class: 'badge ok' }, 'Active') : el('span', { class: 'badge' }, 'Inactive')),
           el('td', null, el('div', { class: 'row', style: { flexWrap: 'nowrap' } }, el('button', { class: 'btn sm', onclick: () => editStudent(x) }, icon('edit'), 'Edit'),
             el('button', { class: 'btn sm danger', 'aria-label': 'Remove', onclick: async () => { if (!(await confirmBox('Remove student', 'Remove ' + x.name + '? Their saved records stay in the backend for audit.', 'Remove', true))) return; try { A().students = await call('deleteStudent', { id: x.id }); drawAdmin(); toast('Removed.', 'ok'); } catch (e) { toast(e.message, 'bad'); } } }, icon('trash'))))));
-      clear(holder).appendChild(tableCard('Students (' + A().students.length + ')', el('div', { class: 'row' }, q, tf, el('button', { class: 'btn', onclick: importRoster }, icon('users'), 'Import 2026–27 class list'), el('button', { class: 'btn', onclick: () => bulk('students') }, icon('upload'), 'Bulk add'), el('button', { class: 'btn primary', onclick: () => editStudent({}) }, icon('plus'), 'Add student')),
+      clear(holder).appendChild(tableCard('Students (' + A().students.length + ')', el('div', { class: 'row' }, q, tf, el('button', { class: 'btn', onclick: importRoster }, icon('users'), 'Import 2026–27 class list & email IDs'), el('button', { class: 'btn', onclick: () => bulk('students') }, icon('upload'), 'Bulk add'), el('button', { class: 'btn primary', onclick: () => editStudent({}) }, icon('plus'), 'Add student')),
         ['SRN', 'Name', 'Email', 'Team', 'Status', ''], rows, 'No students yet.'));
     };
     q.oninput = draw; tf.onchange = draw; draw(); pane.appendChild(holder);
   }
   async function importRoster() {
-    if (!(await confirmBox('Import 2026–27 class list', 'Adds the 17 mini project teams, 54 students (by SRN) and 11 guides from the department team list, with the agreed project titles. Existing entries are kept — nothing is duplicated or deleted.', 'Import'))) return;
+    if (!(await confirmBox('Import 2026–27 class list & email IDs', 'Adds the 17 mini project teams, 54 students (by SRN) and the guides with the agreed project titles, then fills in the student and staff email IDs from the department email list. Existing entries and emails you already set are kept — nothing is duplicated or deleted.', 'Import'))) return;
     try {
       const r = await call('importRoster');
       S.admin = await call('adminData'); drawAdmin();
-      toast('Imported: ' + r.teamsAdded + ' teams, ' + r.studentsAdded + ' students, ' + r.facultyAdded + ' guides added (' + (r.teamsUpdated + r.studentsUpdated) + ' already present).', 'ok');
+      const em = r.emails || {};
+      modal({ title: 'Import complete', body: el('div', null,
+        el('div', { class: 'alert ok' }, icon('check'), el('div', null,
+          el('div', null, 'Teams: ' + r.teamsAdded + ' added, ' + r.teamsUpdated + ' already present.'),
+          el('div', null, 'Students: ' + r.studentsAdded + ' added, ' + r.studentsUpdated + ' already present.'),
+          el('div', null, 'Email IDs set: ' + (em.studentsSet || 0) + ' students, ' + (em.facultySet || 0) + ' staff' + (em.facultyAdded ? ' (+' + em.facultyAdded + ' new staff added)' : '') + '.'))),
+        (em.noEmail || []).length ? el('div', { class: 'alert warn', style: { marginTop: '10px' } }, icon('alert'), el('div', null, el('b', null, 'Still without an email (add via Edit):'), em.noEmail.map(x => el('div', { class: 'small' }, x)))) : null),
+        actions: [{ label: 'OK', cls: 'primary', fn: c => c() }] });
     } catch (e) { toast(e.message, 'bad'); }
   }
   function editStudent(x) {

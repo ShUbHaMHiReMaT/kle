@@ -8,8 +8,8 @@
  *    • Admin UI → Administration → Students → "Import 2026–27 class list"
  *    • or run importRoster2026() once from the Apps Script editor.
  *
- *  The sheet has no email addresses: add each person's email later via
- *  Administration → Faculty / Students → Edit so they can sign in.
+ *  Email IDs come from "Staff and V sem students email ids.xlsx" (EMAILS_2026 below).
+ *  Anyone without an email there can be given one via Administration → Edit.
  * ============================================================================
  */
 var ROSTER_2026 = [
@@ -434,6 +434,324 @@ function importRoster_(ctx) {
   }));
   // 4. Drive evidence folders
   all_('Teams').forEach(x => { try { teamFolder_(x); } catch (e) { /* created on first upload */ } });
+  // 5. Email IDs (from "Staff and V sem students email ids.xlsx")
+  out.emails = applyEmails_();
   audit_(ctx, 'importRoster2026', '', out);
   return out;
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Email IDs — "Staff and V sem students email ids.xlsx"
+ * Students are matched by SRN; staff by the guide name used in the team list.
+ * An email already set by the admin is never overwritten.
+ * -------------------------------------------------------------------------- */
+var EMAILS_2026 = {
+ "students": [
+  [
+   "02FE23BEE028",
+   "02fe23bee028@kletech.ac.in"
+  ],
+  [
+   "02FE23BEE033",
+   "02fe23bee033@kletech.ac.in"
+  ],
+  [
+   "02FE24BEE001",
+   "02fe24bee001@kletech.ac.in"
+  ],
+  [
+   "02FE24BEE003",
+   "02fe24bee003@kletech.ac.in"
+  ],
+  [
+   "02FE24BEE007",
+   "02fe24bee007@kletech.ac.in"
+  ],
+  [
+   "02FE24BEE008",
+   "02fe24bee008@kletech.ac.in"
+  ],
+  [
+   "02FE24BEE009",
+   "02fe24bee009@kletech.ac.in"
+  ],
+  [
+   "02FE24BEE010",
+   "02fe24bee010@kletech.ac.in"
+  ],
+  [
+   "02FE24BEE011",
+   "02fe24bee011@kletech.ac.in"
+  ],
+  [
+   "02FE24BEE013",
+   "02fe24bee013@kletech.ac.in"
+  ],
+  [
+   "02FE24BEE015",
+   "02fe24bee015@kletech.ac.in"
+  ],
+  [
+   "02FE24BEE016",
+   "02fe24bee016@kletech.ac.in"
+  ],
+  [
+   "02FE24BEE017",
+   "02fe24bee017@kletech.ac.in"
+  ],
+  [
+   "02FE24BEE018",
+   "02fe24bee018@kletech.ac.in"
+  ],
+  [
+   "02FE24BEE019",
+   "02fe24bee019@kletech.ac.in"
+  ],
+  [
+   "02FE24BEE020",
+   "02fe24bee020@kletech.ac.in"
+  ],
+  [
+   "02FE24BEE021",
+   "02fe24bee021@kletech.ac.in"
+  ],
+  [
+   "02FE24BEE022",
+   "02fe24bee022@kletech.ac.in"
+  ],
+  [
+   "02FE24BEE023",
+   "02fe24bee023@kletech.ac.in"
+  ],
+  [
+   "02FE24BEE025",
+   "02fe24bee025@kletech.ac.in"
+  ],
+  [
+   "02FE24BEE027",
+   "02fe24bee027@kletech.ac.in"
+  ],
+  [
+   "02FE24BEE029",
+   "02fe24bee029@kletech.ac.in"
+  ],
+  [
+   "02FE24BEE030",
+   "02fe24bee030@kletech.ac.in"
+  ],
+  [
+   "02FE24BEE031",
+   "02fe24bee031@kletech.ac.in"
+  ],
+  [
+   "02FE24BEE032",
+   "02fe24bee032@kletech.ac.in"
+  ],
+  [
+   "02FE24BEE033",
+   "02fe24bee033@kletech.ac.in"
+  ],
+  [
+   "02FE24BEE034",
+   "02fe24bee034@kletech.ac.in"
+  ],
+  [
+   "02FE24BEE035",
+   "02fe24bee035@kletech.ac.in"
+  ],
+  [
+   "02FE24BEE036",
+   "02fe24bee036@kletech.ac.in"
+  ],
+  [
+   "02FE24BEE038",
+   "02fe24bee038@kletech.ac.in"
+  ],
+  [
+   "02FE24BEE039",
+   "02fe24bee039@kletech.ac.in"
+  ],
+  [
+   "02FE24BEE040",
+   "02fe24bee040@kletech.ac.in"
+  ],
+  [
+   "02FE24BEE041",
+   "02fe24bee041@kletech.ac.in"
+  ],
+  [
+   "02FE24BEE042",
+   "02fe24bee042@kletech.ac.in"
+  ],
+  [
+   "02FE24BEE043",
+   "02fe24bee043@kletech.ac.in"
+  ],
+  [
+   "02FE24BEE044",
+   "02fe24bee044@kletech.ac.in"
+  ],
+  [
+   "02FE24BEE045",
+   "02fe24bee045@kletech.ac.in"
+  ],
+  [
+   "02FE24BEE046",
+   "02fe24bee046@kletech.ac.in"
+  ],
+  [
+   "02FE24BEE047",
+   "02fe24bee047@kletech.ac.in"
+  ],
+  [
+   "02FE24BEE048",
+   "02fe24bee048@kletech.ac.in"
+  ],
+  [
+   "02FE24BEE049",
+   "02fe24bee049@kletech.ac.in"
+  ],
+  [
+   "02FE24BEE050",
+   "02fe24bee050@kletech.ac.in"
+  ],
+  [
+   "02FE24BEE051",
+   "02fe24bee051@kletech.ac.in"
+  ],
+  [
+   "02FE24BEE053",
+   "02fe24bee053@kletech.ac.in"
+  ],
+  [
+   "02FE24BEE054",
+   "02fe24bee054@kletech.ac.in"
+  ],
+  [
+   "02FE24BEE056",
+   "02fe24bee056@kletech.ac.in"
+  ],
+  [
+   "02FE24BEE057",
+   "02fe24bee057@kletech.ac.in"
+  ],
+  [
+   "02FE24BEE058",
+   "02fe24bee058@kletech.ac.in"
+  ],
+  [
+   "02FE25BEE404",
+   "02fe25bee404@kletech.ac.in"
+  ],
+  [
+   "02FE25BEE405",
+   "02fe25bee405@kletech.ac.in"
+  ],
+  [
+   "02FE25BEE406",
+   "02fe25bee406@kletech.ac.in"
+  ],
+  [
+   "02FE25BEE408",
+   "02fe25bee408@kletech.ac.in"
+  ]
+ ],
+ "faculty": [
+  [
+   "Dr. Rakhee Kallimani",
+   "rakheekallimani.mss@kletech.ac.in",
+   "existing"
+  ],
+  [
+   "Prof. Arun Shiralkar",
+   "arunshiralkar.mss@kletech.ac.in",
+   "existing"
+  ],
+  [
+   "Dr. Debraj Sarkar",
+   "debrajsarkar.mss@kletech.ac.in",
+   "existing"
+  ],
+  [
+   "Prof. Uma Kulkarni",
+   "umakulkarni.mss@kletech.ac.in",
+   "existing"
+  ],
+  [
+   "Dr. Nalini Karchi",
+   "nalinikarchi.mss@kletech.ac.in",
+   "existing"
+  ],
+  [
+   "Prof. Abhinay Gupta",
+   "abhinaygupta.mss@kletech.ac.in",
+   "existing"
+  ],
+  [
+   "Prof. Rakesh Halligudi",
+   "rakeshhalligudi.mss@kletech.ac.in",
+   "existing"
+  ],
+  [
+   "Dr. Tamalika Chowdhury",
+   "tamalikachoudhary.mss@kletech.ac.in",
+   "existing"
+  ],
+  [
+   "Prof. Anup Pawashe",
+   "anuppawashe.mss@kletech.ac.in",
+   "existing"
+  ],
+  [
+   "Prof. Pragati Annanavar",
+   "pragatiannanavar.mss@kletech.ac.in",
+   "existing"
+  ],
+  [
+   "Prof. Neena Budiyal",
+   "neenabudiyal.mss@kletech.ac.in",
+   "new"
+  ],
+  [
+   "Prof. Vidhyashree Binagure",
+   "vidhyashreebinagure@kletech.ac.in",
+   "new"
+  ]
+ ]
+};
+
+function applyEmails_() {
+  const res = { studentsSet: 0, studentsKept: 0, studentsNotFound: [], facultySet: 0, facultyAdded: 0, facultyKept: 0, noEmail: [] };
+  const t = now_();
+  const taken = {};
+  all_('Students').concat(all_('Faculty')).forEach(x => { if (x.email) taken[String(x.email).toLowerCase()] = 1; });
+  // Students by SRN
+  const bySrn = {};
+  all_('Students').forEach(s => bySrn[String(s.usn).toUpperCase()] = s);
+  EMAILS_2026.students.forEach(e => {
+    const st = bySrn[e[0]];
+    if (!st) { res.studentsNotFound.push(e[0]); return; }
+    if (st.email) { res.studentsKept++; return; }
+    if (taken[e[1]]) { res.studentsKept++; return; }
+    update_('Students', st._row, { email: e[1], updatedAt: t }); taken[e[1]] = 1; res.studentsSet++;
+  });
+  // Staff by name
+  const byName = {};
+  all_('Faculty').forEach(f => byName[String(f.name).toLowerCase()] = f);
+  EMAILS_2026.faculty.forEach(e => {
+    const f = byName[e[0].toLowerCase()];
+    if (f) {
+      if (f.email || taken[e[1]]) { res.facultyKept++; return; }
+      update_('Faculty', f._row, { email: e[1], updatedAt: t }); taken[e[1]] = 1; res.facultySet++;
+    } else if (!taken[e[1]]) {
+      insert_('Faculty', { id: uid_('fac'), name: e[0], email: e[1], designation: 'Faculty', phone: '', role: 'Faculty', active: 'true', createdAt: t, updatedAt: t });
+      taken[e[1]] = 1; res.facultyAdded++;
+    } else res.facultyKept++;
+  });
+  all_('Students').filter(s => bool_(s.active) && !s.email).forEach(s => res.noEmail.push(s.name + ' (' + s.usn + ')'));
+  all_('Faculty').filter(f => bool_(f.active) && !f.email).forEach(f => res.noEmail.push(f.name));
+  // Share each team's Drive evidence folder now that emails exist
+  all_('Teams').forEach(x => shareTeamFolder_(x));
+  return res;
 }
