@@ -30,13 +30,14 @@ const SCHEMA = {
   MentorLog: ['id', 'teamId', 'stageId', 'mode', 'userEmail', 'userName', 'role', 'text', 'model', 'createdAt', 'facultyNote', 'noteBy', 'score'],
   Audit:     ['at', 'email', 'role', 'action', 'teamId', 'detail'],
   Announcements: ['id', 'title', 'message', 'audience', 'createdBy', 'createdAt', 'active', 'emailed'],
-  Quizzes:   ['id', 'teamId', 'stageId', 'userEmail', 'userName', 'questionsJson', 'resultsJson', 'current', 'askedAt', 'pendingJson', 'status', 'score', 'model', 'createdAt', 'finishedAt']
+  Quizzes:   ['id', 'teamId', 'stageId', 'userEmail', 'userName', 'questionsJson', 'resultsJson', 'current', 'askedAt', 'pendingJson', 'status', 'score', 'model', 'createdAt', 'finishedAt', 'level', 'format', 'timed']
 };
 const DEFAULT_SETTINGS = {
   defaultKeyId: '', defaultModel: 'gemini-2.5-flash', mentorDailyLimit: 40,
   mentorTemperature: 0.6, enforceGates: true, showMarksToStudents: false,
   allowOtpLogin: true,
   quizSeconds: 45, quizQuestions: 5,
+  quizTimed: false,   // HoD switch: count down each quiz question, or no time limit
   // Shared Google Drive folder for ALL staff (faculty, coordinators, reviewers, HoD) — hidden from students.
   staffFolderUrl: 'https://drive.google.com/drive/folders/1pACuNd3e2QCBC-2Q9-blzSCqfEBz332a?usp=sharing'
 };
@@ -401,6 +402,7 @@ const ACTIONS = {
   quizStart:    { roles: ['student'], write: true, ai: true, fn: (c, a) => quizStart_(c, a) },
   quizAnswer:   { roles: ['student'], write: true, ai: true, fn: (c, a) => quizAnswer_(c, a) },
   quizNext:     { roles: ['student'], write: true, fn: (c, a) => quizNext_(c, a) },
+  quizResults:  { roles: ['admin', 'coordinator', 'faculty'], fn: (c, a) => quizResults_(c, a) },
   viewHtml:     { roles: ['admin', 'coordinator', 'faculty', 'student'], fn: (c, a) => viewHtml_(c, a) },
   mentorNote:   { roles: ['admin', 'coordinator', 'faculty'], write: true, fn: (c, a) => mentorNote_(c, a) },
   // student's own Gemini key (stored server-side only)
@@ -488,7 +490,7 @@ function bootstrap_(ctx) {
     announcements: announcementsFor_(ctx),
     // Staff-only shared Drive folder: never sent to students.
     staffFolderUrl: ctx.role === 'student' ? '' : (s.staffFolderUrl || ''),
-    settings: { quizSeconds: quizCfg_().seconds, quizQuestions: quizCfg_().questions, enforceGates: s.enforceGates, showMarksToStudents: s.showMarksToStudents, mentorDailyLimit: s.mentorDailyLimit, mentorEnabled: keysMeta_().length > 0 || (ctx.role === 'student' && !!studentKey_(ctx)) }
+    settings: { quizSeconds: quizCfg_().seconds, quizQuestions: quizCfg_().questions, quizTimed: quizCfg_().timed, enforceGates: s.enforceGates, showMarksToStudents: s.showMarksToStudents, mentorDailyLimit: s.mentorDailyLimit, mentorEnabled: keysMeta_().length > 0 || (ctx.role === 'student' && !!studentKey_(ctx)) }
   });
 }
 /* ============================================================================
@@ -1447,7 +1449,7 @@ function saveSettings_(ctx, a) {
   if (a.defaultModel !== undefined) s.defaultModel = clean_(a.defaultModel, 80) || DEFAULT_SETTINGS.defaultModel;
   if (a.mentorDailyLimit !== undefined) s.mentorDailyLimit = Math.max(1, Math.min(1000, Number(a.mentorDailyLimit) || 40));
   if (a.mentorTemperature !== undefined) s.mentorTemperature = Math.max(0, Math.min(1.5, Number(a.mentorTemperature)));
-  ['enforceGates', 'showMarksToStudents', 'allowOtpLogin'].forEach(k => { if (a[k] !== undefined) s[k] = !!a[k]; });
+  ['enforceGates', 'showMarksToStudents', 'allowOtpLogin', 'quizTimed'].forEach(k => { if (a[k] !== undefined) s[k] = !!a[k]; });
   if (a.quizSeconds !== undefined) s.quizSeconds = Math.max(15, Math.min(300, Math.round(Number(a.quizSeconds)) || 45));
   if (a.quizQuestions !== undefined) s.quizQuestions = Math.max(3, Math.min(10, Math.round(Number(a.quizQuestions)) || 5));
   if (a.staffFolderUrl !== undefined) {
@@ -1544,7 +1546,7 @@ function deleteMyKey_(ctx) {
 /** Quiz length and time per question are set by the HoD (Administration → AI Questions). */
 function quizCfg_() {
   const s = settings_();
-  return { questions: Math.max(3, Math.min(10, Number(s.quizQuestions) || 5)), seconds: Math.max(15, Math.min(300, Number(s.quizSeconds) || 45)), grace: 8 };
+  return { questions: Math.max(3, Math.min(10, Number(s.quizQuestions) || 5)), seconds: Math.max(15, Math.min(300, Number(s.quizSeconds) || 45)), grace: 8, timed: !!s.quizTimed };
 }
 /** Key, model and daily-limit check shared by mentor features. */
 function mentorAccess_(ctx, team) {
@@ -1630,11 +1632,28 @@ function notesText_(themeId) {
 function shortBook_(name) {
   return String(name || '').replace(/\.pdf$/i, '').replace(/\(z-?lib[^)]*\)|\(Z-Library\)/gi, '').replace(/_/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60);
 }
+/* Quiz levels chosen by the student. The level changes how hard the questions are and how strictly
+ * written answers are marked; it is saved with every quiz so the HoD can see it (Quiz results, logs). */
+const QUIZ_LEVELS = {
+  easy:   { label: 'Easy',   ask: 'EASY level: basic recall and understanding — definitions, what a block or component does, which unit, which instrument, reading their own entry back. One idea per question.',
+            mark: 'EASY level: give 2 if the core idea is right even if the wording is simple.' },
+  medium: { label: 'Medium', ask: 'MEDIUM level: application and reasoning — why a method/topology/value was chosen, how one quantity affects another, how they will measure or verify it, simple one-step calculations.',
+            mark: 'MEDIUM level: give 2 only if the reasoning is right and specific (correct relation, unit or method).' },
+  hard:   { label: 'Hard',   ask: 'HARD level: analysis and design — multi-step reasoning, small calculations with numbers and units, trade-offs, "what happens if this value changes by 30 %", failure modes, predicted vs measured gaps.',
+            mark: 'HARD level: give 2 only for a precise, complete answer with correct numbers/units or a clear chain of reasoning; partial reasoning gets 1.' }
+};
+const QUIZ_FORMATS = { written: 'Written', mcq: 'MCQ' };
+const quizLevel_ = v => QUIZ_LEVELS[String(v || '').toLowerCase()] ? String(v).toLowerCase() : 'medium';
+const quizFormat_ = v => QUIZ_FORMATS[String(v || '').toLowerCase()] ? String(v).toLowerCase() : 'written';
+const LETTERS = ['A', 'B', 'C', 'D'];
+
 function quizStart_(ctx, a) {
   const team = teamAccess_(ctx, a.teamId, 'write');
   const stage = stageById_(a.stageId);
   if (!stage) throw new Error('Choose a stage.');
   const cfg = quizCfg_();
+  const level = quizLevel_(a.level), format = quizFormat_(a.format), mcq = format === 'mcq';
+  const L = QUIZ_LEVELS[level];
   const theme = themeById_(team.themeId);
   const work = stageRecordsText_(team, stage, ctx);
   const project = projectContext_(team, theme);
@@ -1651,14 +1670,20 @@ function quizStart_(ctx, a) {
   if (nInput) plan.push(' FIRST ' + nInput + ' question(s) — kind "inputs": about what THIS student actually typed in their saved ' + stage.code + ' entries. Name or quote the entry (e.g. "Your FR2 says ±1 %, which instrument will measure it and why?").');
   plan.push(' ' + (nInput ? 'NEXT ' : 'FIRST ') + nProj + ' question(s) — kind "project": about their project as a whole — their artefact, title and theme (why this topology/method, how a block works, what happens if a value changes, how they will test it).');
   if (nBook) plan.push(' LAST ' + nBook + ' question(s) — kind "book": a fundamental behind their project taken from ONE of the textbooks in the REFERENCE NOTES (governing equation, principle, method, pitfall). Set "source" to that book\'s exact name as written after "BOOK:" and "ref" to the chapter/section given in its notes (e.g. "Ch.6.3"). Use different books where possible.');
+  const shape = mcq
+    ? '{"questions":[{"kind":"inputs|project|book","q":"question text","entry":"short label","source":"exact book name for kind book, else empty","ref":"chapter for kind book, else empty","options":["option 1","option 2","option 3","option 4"],"answer":0,"explain":"1–2 sentences: why the right option is right and the most tempting wrong one is wrong"}]}'
+    : '{"questions":[{"kind":"inputs|project|book","q":"question text","entry":"short label of what it is about","source":"exact book name for kind book, else empty","ref":"chapter for kind book, else empty"}]}';
   const sys = [
     'You are the AI Mentor for the ' + DEPARTMENT.course + ', ' + DEPARTMENT.name + ', ' + DEPARTMENT.institution + '.',
-    'Prepare a short oral-style quiz for ONE student about THEIR OWN MINI PROJECT (their theme, artefact and the work they saved for stage ' + stage.code + ' — ' + stage.title + ').',
+    'Prepare a short ' + (mcq ? 'MULTIPLE-CHOICE (MCQ)' : 'oral-style written') + ' quiz for ONE student about THEIR OWN MINI PROJECT (their theme, artefact and the work they saved for stage ' + stage.code + ' — ' + stage.title + ').',
+    'DIFFICULTY — ' + L.ask,
     'Write exactly ' + N + ' questions, in this order:',
     plan.join('\n'),
-    'Every question must still be relevant to THIS student\'s project. Each question must be answerable in about ' + cfg.seconds + ' seconds (one or two sentences) and be under 35 words. No answers or hints.',
+    'Every question must still be relevant to THIS student\'s project. ' + (mcq
+      ? 'Each MCQ has exactly 4 short options with exactly ONE correct answer ("answer" = its index 0–3). Wrong options must be plausible (common mistakes, wrong unit, wrong relation), never silly, and must not overlap with the right one. Do not use "all of the above"/"none of the above". Question under 35 words, each option under 20 words.'
+      : 'Each question must be answerable in one or two sentences and be under 35 words. No answers or hints.'),
     PLAIN_MATH_RULE,
-    'Return ONLY JSON: {"questions":[{"kind":"inputs|project|book","q":"question text","entry":"short label of what it is about","source":"exact book name for kind book, else empty","ref":"chapter for kind book, else empty"}]}',
+    'Return ONLY JSON: ' + shape,
     '',
     'THE STUDENT\'S PROJECT:',
     project,
@@ -1670,31 +1695,50 @@ function quizStart_(ctx, a) {
     handbookStageText_(stage, theme),
     notes ? '\nREFERENCE NOTES FROM THE CORE TEXTBOOKS (use these for the fundamentals):\n' + notes : ''
   ].filter(x => x !== '').join('\n');
-  const out = callGemini_(m.key, m.model, sys, [{ role: 'user', parts: [{ text: 'Write the ' + cfg.questions + ' quiz questions now.' }] }], 0.7, 8192, true);
+  const out = callGemini_(m.key, m.model, sys, [{ role: 'user', parts: [{ text: 'Write the ' + N + ' quiz questions now.' }] }], 0.7, 8192, true);
   const ORDER = { inputs: 0, project: 1, book: 2 };
   const qs = ((parseJson_(out).questions) || []).map(x => {
-    if (typeof x === 'string') return { q: plainMath_(clean_(x, 400)), entry: '', kind: 'project', source: '' };
+    if (typeof x === 'string') return mcq ? null : { q: plainMath_(clean_(x, 400)), entry: '', kind: 'project', source: '' };
+    if (!x) return null;
     let kind = ORDER[String(x.kind || '').toLowerCase()] !== undefined ? String(x.kind).toLowerCase() : 'project';
     const book = kind === 'book' || x.source ? matchBook_(x.source, books) : '';
     if (kind === 'book' && !book) kind = 'project';
     if (kind === 'inputs' && !work) kind = 'project';
-    return { q: plainMath_(clean_(x.q, 400)), entry: plainMath_(clean_(x.entry, 120)), kind: kind, source: book, ref: book ? clean_(x.ref, 40) : '' };
-  }).filter(x => x.q).slice(0, cfg.questions)
+    const item = { q: plainMath_(clean_(x.q, 400)), entry: plainMath_(clean_(x.entry, 120)), kind: kind, source: book, ref: book ? clean_(x.ref, 40) : '' };
+    if (mcq) {
+      const opts = (Array.isArray(x.options) ? x.options : []).map(o => plainMath_(clean_(o, 200)).replace(/^\s*[A-Da-d][).:]\s+/, ''));
+      const ans = Math.round(Number(x.answer));
+      const uniq = opts.filter((o, k) => o && opts.findIndex(p => p.toLowerCase() === o.toLowerCase()) === k);
+      if (opts.length !== 4 || uniq.length !== 4 || !(ans >= 0 && ans <= 3)) return null;   // drop broken MCQs
+      // shuffle so the right answer is not always in the same place
+      const order = [0, 1, 2, 3].sort(() => Math.random() - 0.5);
+      item.options = order.map(k => opts[k]);
+      item.answer = order.indexOf(ans);
+      item.explain = plainMath_(clean_(x.explain, 600));
+    }
+    return item;
+  }).filter(x => x && x.q).slice(0, N)
     .map((x, k) => Object.assign(x, { _k: k })).sort((x, y) => (ORDER[x.kind] - ORDER[y.kind]) || (x._k - y._k))
     .map(x => { delete x._k; return x; });
   if (qs.length < 3) throw new Error('The AI Mentor could not prepare questions right now. Please try again in a moment.');
   where_('Quizzes', 'userEmail', ctx.email).filter(q => q.status === 'running').forEach(q => update_('Quizzes', q._row, { status: 'abandoned' }));
   const id = uid_('qz'), t = now_();
+  const meta = { level: level, format: format, timed: cfg.timed };
   insert_('Quizzes', { id: id, teamId: team.id, stageId: stage.id, userEmail: ctx.email, userName: ctx.name, questionsJson: JSON.stringify(qs),
-    resultsJson: '[]', current: 0, askedAt: t, pendingJson: '', status: 'running', score: '', model: m.model, createdAt: t, finishedAt: '' });
+    resultsJson: '[]', current: 0, askedAt: t, pendingJson: '', status: 'running', score: '', model: m.model, createdAt: t, finishedAt: '',
+    level: level, format: format, timed: String(cfg.timed) });
+  const what = L.label + ' ' + QUIZ_FORMATS[format] + ' quiz';
   const log = [
-    logMentor_(ctx, team.id, stage.id, 'user', 'Started a timed quiz on ' + stage.code + ' (' + qs.length + ' questions about my project × ' + cfg.seconds + ' s).', m.model, '', 0),
-    logMentor_(ctx, team.id, stage.id, 'model', questionText_(qs, 0, cfg.seconds, stage), m.model, '', 1)
+    logMentor_(ctx, team.id, stage.id, 'user', 'Started a ' + what + ' on ' + stage.code + ' (' + qs.length + ' questions about my project' + (cfg.timed ? ' × ' + cfg.seconds + ' s' : ', no time limit') + ').', m.model, '', 0),
+    logMentor_(ctx, team.id, stage.id, 'model', questionText_(qs, 0, meta, stage), m.model, '', 1)
   ];
-  audit_(ctx, 'quizStart', team.id, stage.code);
-  return Object.assign({ quizId: id, index: 0, total: qs.length, seconds: cfg.seconds, limit: cfg.seconds, log: log }, questionView_(qs[0], stage));
+  audit_(ctx, 'quizStart', team.id, stage.code + ' · ' + L.label + ' · ' + QUIZ_FORMATS[format] + (cfg.timed ? ' · timed' : ''));
+  return Object.assign({ quizId: id, index: 0, total: qs.length, seconds: cfg.timed ? cfg.seconds : 0, limit: cfg.timed ? cfg.seconds : 0, log: log }, questionView_(qs[0], stage, meta));
 }
-/** Where a quiz question comes from, in words the student understands. */
+/** Quiz settings saved with the quiz (old quizzes default to Medium · Written · timed). */
+function quizMeta_(q) {
+  return { level: quizLevel_(q.level), format: quizFormat_(q.format), timed: q.timed === '' || q.timed === undefined ? true : bool_(q.timed) };
+}
 /** "Book, Ch.x — why this book" from the AI's answer, checked against the real book list.
  *  A book question always gets its own book as the reference. */
 function referenceOf_(r, q, themeId) {
@@ -1707,15 +1751,25 @@ function referenceOf_(r, q, themeId) {
   const why = plainMath_(clean_(r.why, 200)) || b.why || '';
   return title + (chapter ? ', ' + chapter : '') + (why ? ' — why this book: ' + why : '');
 }
+/** Where a quiz question comes from, in words the student understands. */
 function sourceLabel_(x, stage) {
   if (!x) return '';
   if (x.kind === 'book' && x.source) return 'Textbook: ' + x.source + (x.ref ? ', ' + x.ref : '');
   if (x.kind === 'inputs') return 'Your saved ' + ((stage && stage.code) || '') + ' entries';
   return 'Your project';
 }
-function questionView_(x, stage) { return { question: x.q, entry: x.entry, kind: x.kind || 'project', source: x.source || '', sourceLabel: sourceLabel_(x, stage) }; }
-function questionText_(qs, i, secs, stage) {
-  return '**Question ' + (i + 1) + ' of ' + qs.length + '** (' + secs + ' s) — *' + sourceLabel_(qs[i], stage) + '*' + (qs[i].entry ? ' · about *' + qs[i].entry + '*' : '') + '\n' + qs[i].q;
+/** What the student's screen gets for one question — never the right answer. */
+function questionView_(x, stage, meta) {
+  const v = { question: x.q, entry: x.entry, kind: x.kind || 'project', source: x.source || '', sourceLabel: sourceLabel_(x, stage),
+              level: meta.level, levelLabel: QUIZ_LEVELS[meta.level].label, format: meta.format, timed: meta.timed };
+  if (meta.format === 'mcq') v.options = (x.options || []).slice();
+  return v;
+}
+function questionText_(qs, i, meta, stage) {
+  const x = qs[i];
+  return '**Question ' + (i + 1) + ' of ' + qs.length + '** · ' + QUIZ_LEVELS[meta.level].label + ' · ' + QUIZ_FORMATS[meta.format] + (meta.timed ? ' (' + quizCfg_().seconds + ' s)' : '') +
+    ' — *' + sourceLabel_(x, stage) + '*' + (x.entry ? ' · about *' + x.entry + '*' : '') + '\n' + x.q +
+    (meta.format === 'mcq' ? '\n' + (x.options || []).map((o, k) => LETTERS[k] + ') ' + o).join('\n') : '');
 }
 function quizAnswer_(ctx, a) {
   const q = one_('Quizzes', 'id', a.quizId);
@@ -1724,6 +1778,7 @@ function quizAnswer_(ctx, a) {
   if (q.status !== 'running') throw new Error('This quiz has already ended. Start a new one.');
   const i = Number(q.current || 0);
   if (Number(a.index) !== i) throw new Error('This question was already answered.');
+  const meta = quizMeta_(q), mcq = meta.format === 'mcq', L = QUIZ_LEVELS[meta.level];
   const qs = safeJson_(q.questionsJson, []);
   const results = safeJson_(q.resultsJson, []);
   const log = [];
@@ -1732,60 +1787,79 @@ function quizAnswer_(ctx, a) {
   if (!pend || pend.index !== i) {
     if (!q.askedAt) throw new Error('Open the next question first.');
     const secs = Math.max(0, Math.round((Date.now() - new Date(q.askedAt).getTime()) / 1000));
-    const late = secs > quizCfg_().seconds + quizCfg_().grace;
-    pend = { index: i, answer: late ? '' : clean_(a.answer, 1500), seconds: secs, late: late };
+    const late = meta.timed && secs > quizCfg_().seconds + quizCfg_().grace;
+    let answer = '', choice = -1;
+    if (mcq) { const c = Math.round(Number(a.choice)); choice = !late && c >= 0 && c <= 3 && a.choice !== '' && a.choice !== null && a.choice !== undefined ? c : -1; answer = choice >= 0 ? '(' + LETTERS[choice] + ') ' + ((qs[i].options || [])[choice] || '') : ''; }
+    else answer = late ? '' : clean_(a.answer, 1500);
+    pend = { index: i, answer: answer, choice: choice, seconds: secs, late: late };
     update_('Quizzes', q._row, { pendingJson: JSON.stringify(pend) });
     log.push(logMentor_(ctx, team.id, q.stageId, 'user', pend.answer ? 'A' + (i + 1) + ': ' + pend.answer : (late ? '(time up — no answer counted)' : '(no answer)'), q.model, '', 0));
   }
   const stage = stageById_(q.stageId) || { code: '' };
   const theme = themeById_(team.themeId);
-  const m = mentorAccess_(ctx, team);
-  const notes = notesText_(team.themeId);
-  const sys = [
-    'You are the AI Mentor marking ONE quiz answer of a 5th-semester EEE student about their own mini project. Talk directly to the student ("you") in a friendly, encouraging mentor voice, in simple English.',
-    'Mark 0, 1 or 2: 2 = correct, specific and sound engineering; 1 = partly correct, incomplete or vague; 0 = wrong, blank, off-topic or time ran out.',
-    'Then respond like a mentor:',
-    '- If 2: confirm briefly why the answer is right (1–2 sentences).',
-    '- If 0 or 1: say what was wrong or missing, starting with "You answered … but …" (or "You did not answer in time." if blank), then explain THE CORRECT WAY TO ANSWER — the right reasoning, equation, unit or measurement method — in 2–4 sentences.',
-    'Keep feedback under 90 words. Judge using the student\'s saved work, the handbook, and the textbook reference notes below; do not invent requirements and do not copy long passages.',
-    'If the question names a SOURCE TEXTBOOK, judge mainly from that book\'s notes. Whenever you use a textbook, name it in "correct_way" (e.g. "As Hart, Power Electronics, Ch.6.3 explains, …") and fill "reference" with the book (exact name after "BOOK:"), the chapter, and one short reason why that book is the right reference (from its WHY THIS BOOK line). Leave "reference" empty only if no textbook was needed.',
-    PLAIN_MATH_RULE,
-    'Return ONLY JSON: {"mark":0,"verdict":"correct|partly correct|incorrect","feedback":"what was right/wrong in their answer","correct_way":"the correct way to answer (empty if mark is 2)","reference":{"book":"exact book name or empty","chapter":"e.g. Ch.6.3","why":"why this book is the right reference"}}',
-    '',
-    'HANDBOOK REQUIREMENTS FOR THIS STAGE:',
-    handbookStageText_(stage, theme),
-    '',
-    'THEIR SAVED WORK — ' + stage.code + ':',
-    stageRecordsText_(team, stage, ctx),
-    notes ? '\nTEXTBOOK REFERENCE NOTES:\n' + notes : ''
-  ].filter(x => x !== '').join('\n');
-  const userMsg = 'QUESTION: ' + qs[i].q + (qs[i].entry ? '\n(About: ' + qs[i].entry + ')' : '') + (qs[i].source ? '\nSOURCE TEXTBOOK: ' + qs[i].source + (qs[i].ref ? ' (' + qs[i].ref + ')' : '') : '\nSOURCE: ' + sourceLabel_(qs[i], stage)) + '\nSTUDENT ANSWER: ' + (pend.answer || '(no answer — time ran out)');
-  const res = parseJson_(callGemini_(m.key, m.model, sys, [{ role: 'user', parts: [{ text: userMsg }] }], 0.3, 8192, true));
-  let mark = Math.round(Number(res.mark));
-  if (isNaN(mark)) mark = 0;
-  mark = Math.max(0, Math.min(2, mark));
-  if (!pend.answer) mark = 0;
+  let mark, feedback, correct, reference;
+  if (mcq) {
+    // MCQ: marked here, instantly — no AI call. The right answer was never sent to the browser.
+    const x = qs[i], right = Number(x.answer), rightText = '(' + LETTERS[right] + ') ' + (x.options || [])[right];
+    mark = pend.choice === right ? 2 : 0;
+    feedback = mark === 2 ? 'Correct — ' + rightText + '.' : pend.choice >= 0 ? 'You chose ' + pend.answer + ', but the correct answer is ' + rightText + '.' : (pend.late ? 'You did not answer in time.' : 'You did not choose an answer.') + ' The correct answer is ' + rightText + '.';
+    correct = mark === 2 ? '' : rightText + (x.explain ? ' — ' + x.explain : '');
+    if (mark === 2 && x.explain) feedback += ' ' + x.explain;
+    reference = x.source ? referenceOf_({}, x, team.themeId) : '';
+  } else {
+    const m = mentorAccess_(ctx, team);
+    const notes = notesText_(team.themeId);
+    const sys = [
+      'You are the AI Mentor marking ONE quiz answer of a 5th-semester EEE student about their own mini project. Talk directly to the student ("you") in a friendly, encouraging mentor voice, in simple English.',
+      'Mark 0, 1 or 2: 2 = correct, specific and sound engineering; 1 = partly correct, incomplete or vague; 0 = wrong, blank, off-topic or time ran out.',
+      'This is a ' + L.label.toUpperCase() + ' question. ' + L.mark,
+      'Then respond like a mentor:',
+      '- If 2: confirm briefly why the answer is right (1–2 sentences).',
+      '- If 0 or 1: say what was wrong or missing, starting with "You answered … but …" (or "You did not answer in time." if blank), then explain THE CORRECT WAY TO ANSWER — the right reasoning, equation, unit or measurement method — in 2–4 sentences.',
+      'Keep feedback under 90 words. Judge using the student\'s saved work, the handbook, and the textbook reference notes below; do not invent requirements and do not copy long passages.',
+      'If the question names a SOURCE TEXTBOOK, judge mainly from that book\'s notes. Whenever you use a textbook, name it in "correct_way" (e.g. "As Hart, Power Electronics, Ch.6.3 explains, …") and fill "reference" with the book (exact name after "BOOK:"), the chapter, and one short reason why that book is the right reference (from its WHY THIS BOOK line). Leave "reference" empty only if no textbook was needed.',
+      PLAIN_MATH_RULE,
+      'Return ONLY JSON: {"mark":0,"verdict":"correct|partly correct|incorrect","feedback":"what was right/wrong in their answer","correct_way":"the correct way to answer (empty if mark is 2)","reference":{"book":"exact book name or empty","chapter":"e.g. Ch.6.3","why":"why this book is the right reference"}}',
+      '',
+      'HANDBOOK REQUIREMENTS FOR THIS STAGE:',
+      handbookStageText_(stage, theme),
+      '',
+      'THEIR SAVED WORK — ' + stage.code + ':',
+      stageRecordsText_(team, stage, ctx),
+      notes ? '\nTEXTBOOK REFERENCE NOTES:\n' + notes : ''
+    ].filter(x => x !== '').join('\n');
+    const userMsg = 'QUESTION: ' + qs[i].q + (qs[i].entry ? '\n(About: ' + qs[i].entry + ')' : '') + (qs[i].source ? '\nSOURCE TEXTBOOK: ' + qs[i].source + (qs[i].ref ? ' (' + qs[i].ref + ')' : '') : '\nSOURCE: ' + sourceLabel_(qs[i], stage)) + '\nSTUDENT ANSWER: ' + (pend.answer || '(no answer — time ran out)');
+    const res = parseJson_(callGemini_(m.key, m.model, sys, [{ role: 'user', parts: [{ text: userMsg }] }], 0.3, 8192, true));
+    mark = Math.round(Number(res.mark));
+    if (isNaN(mark)) mark = 0;
+    mark = Math.max(0, Math.min(2, mark));
+    if (!pend.answer) mark = 0;
+    feedback = plainMath_(clean_(res.feedback, 1200));
+    correct = mark === 2 ? '' : plainMath_(clean_(res.correct_way, 1200));
+    reference = referenceOf_(res.reference, qs[i], team.themeId);
+  }
   const verdict = mark === 2 ? 'correct' : mark === 1 ? 'partly correct' : 'incorrect';
-  const feedback = plainMath_(clean_(res.feedback, 1200)), correct = mark === 2 ? '' : plainMath_(clean_(res.correct_way, 1200));
-  const reference = referenceOf_(res.reference, qs[i], team.themeId);
   const srcLabel = sourceLabel_(qs[i], stage);
   results.push({ q: qs[i].q, entry: qs[i].entry, source: qs[i].source || '', sourceLabel: srcLabel, answer: pend.answer, seconds: pend.seconds, late: pend.late, mark: mark, verdict: verdict, feedback: feedback, correct: correct });
   const icon = mark === 2 ? '✅' : mark === 1 ? '🟡' : '❌';
-  log.push(logMentor_(ctx, team.id, q.stageId, 'model', icon + ' **' + mark + '/2 — ' + verdict + '**' + (pend.late ? ' *(time up)*' : ' *(answered in ' + pend.seconds + ' s)*') + '\n' + feedback + (correct ? '\n\n**The correct way to answer:** ' + correct : '') + (reference ? '\n\n📘 **Reference:** ' + reference : '') + '\n\n*Question source: ' + srcLabel + '*', m.model, '', 1));
+  const timing = pend.late ? ' *(time up)*' : ' *(answered in ' + pend.seconds + ' s)*';
+  log.push(logMentor_(ctx, team.id, q.stageId, 'model', icon + ' **' + mark + '/2 — ' + verdict + '**' + timing + '\n' + feedback + (correct ? '\n\n**The correct ' + (mcq ? 'answer' : 'way to answer') + ':** ' + correct : '') + (reference ? '\n\n📘 **Reference:** ' + reference : '') + '\n\n*Question source: ' + srcLabel + '*', q.model, '', 1));
   const done = i + 1 >= qs.length;
   const upd = { resultsJson: JSON.stringify(results), current: i + 1, askedAt: '', pendingJson: '' };
-  const out = { index: i, mark: mark, verdict: verdict, feedback: feedback, correct: correct, reference: reference, source: qs[i].source || '', sourceLabel: srcLabel, late: pend.late, seconds: pend.seconds, done: done, total: qs.length, log: log };
+  const out = { index: i, mark: mark, verdict: verdict, feedback: feedback, correct: correct, reference: reference, source: qs[i].source || '', sourceLabel: srcLabel, late: pend.late, seconds: pend.seconds, done: done, total: qs.length, log: log,
+                format: meta.format, level: meta.level, choice: mcq ? pend.choice : undefined, answerIndex: mcq ? Number(qs[i].answer) : undefined };
   if (done) {
     const sum = results.reduce((n, r) => n + r.mark, 0);
     const score = Math.round((sum / (2 * results.length)) * 10 * 2) / 2;   // out of 10
     const band = score >= 9 ? 'Exemplary' : score >= 7 ? 'Competent' : score >= 4 ? 'Developing' : 'Inadequate';
-    const summary = '**Quiz score: ' + score + '/10** — ' + band + (stage.code ? ' (' + stage.code + ')' : '') + '\n' +
+    const what = L.label + ' · ' + QUIZ_FORMATS[meta.format] + (meta.timed ? ' · timed' : '');
+    const summary = '**Quiz score: ' + score + '/10** — ' + band + ' (' + (stage.code ? stage.code + ' · ' : '') + what + ')\n' +
       results.map((r, k) => '- Q' + (k + 1) + ' — ' + r.mark + '/2 ' + (r.mark === 2 ? '✅' : r.mark === 1 ? '🟡' : '❌') + (r.late ? ' (time up)' : ' (' + r.seconds + ' s)') + (r.sourceLabel ? ' · ' + r.sourceLabel : '')).join('\n') +
       '\n\nRead the feedback above, revise these topics (handbook + textbooks) and improve your ' + (stage.code || 'project') + ' work, then try again.';
-    log.push(logMentor_(ctx, team.id, q.stageId, 'model', summary, m.model, String(score), 2));
+    log.push(logMentor_(ctx, team.id, q.stageId, 'model', summary, q.model, String(score), 2));
     upd.status = 'done'; upd.score = String(score); upd.finishedAt = now_();
     out.score = score; out.band = band; out.results = results;
-    audit_(ctx, 'quizDone', team.id, stage.code + ' ' + score + '/10');
+    audit_(ctx, 'quizDone', team.id, stage.code + ' · ' + what + ' · ' + score + '/10');
   }
   update_('Quizzes', q._row, upd);
   return out;
@@ -1798,12 +1872,26 @@ function quizNext_(ctx, a) {
   const qs = safeJson_(q.questionsJson, []);
   const i = Number(q.current || 0);
   if (i >= qs.length) throw new Error('No more questions.');
+  const meta = quizMeta_(q), stage = stageById_(q.stageId), secs = quizCfg_().seconds;
   if (q.askedAt) {   // already open (e.g. page refresh): keep the original start time
-    return Object.assign({ quizId: q.id, index: i, total: qs.length, seconds: Math.max(0, quizCfg_().seconds - Math.round((Date.now() - new Date(q.askedAt).getTime()) / 1000)), limit: quizCfg_().seconds, log: [] }, questionView_(qs[i], stageById_(q.stageId)));
+    const left = meta.timed ? Math.max(0, secs - Math.round((Date.now() - new Date(q.askedAt).getTime()) / 1000)) : 0;
+    return Object.assign({ quizId: q.id, index: i, total: qs.length, seconds: left, limit: meta.timed ? secs : 0, log: [] }, questionView_(qs[i], stage, meta));
   }
   update_('Quizzes', q._row, { askedAt: now_() });
-  const log = [logMentor_(ctx, team.id, q.stageId, 'model', questionText_(qs, i, quizCfg_().seconds, stageById_(q.stageId)), q.model, '', 0)];
-  return Object.assign({ quizId: q.id, index: i, total: qs.length, seconds: quizCfg_().seconds, limit: quizCfg_().seconds, log: log }, questionView_(qs[i], stageById_(q.stageId)));
+  const log = [logMentor_(ctx, team.id, q.stageId, 'model', questionText_(qs, i, meta, stage), q.model, '', 0)];
+  return Object.assign({ quizId: q.id, index: i, total: qs.length, seconds: meta.timed ? secs : 0, limit: meta.timed ? secs : 0, log: log }, questionView_(qs[i], stage, meta));
+}
+/** HoD / coordinator (all teams) and guides (their teams): every quiz with level, type, timing and score. */
+function quizResults_(ctx, a) {
+  const teams = {}; visibleTeams_(ctx).forEach(t => { teams[t.id] = t; });
+  const usn = {}; all_('Students').forEach(s => { usn[String(s.email).toLowerCase()] = s.usn; });
+  return all_('Quizzes').filter(q => teams[q.teamId]).map(q => {
+    const m = quizMeta_(q), st = stageById_(q.stageId) || {};
+    const res = safeJson_(q.resultsJson, []), total = safeJson_(q.questionsJson, []).length;
+    return { id: q.id, at: q.createdAt, finishedAt: q.finishedAt, student: q.userName, usn: usn[String(q.userEmail).toLowerCase()] || '', team: teams[q.teamId].name, teamId: q.teamId,
+             stage: st.code || q.stageId, level: QUIZ_LEVELS[m.level].label, format: QUIZ_FORMATS[m.format], timed: m.timed,
+             status: q.status, score: q.score, answered: res.length, total: total };
+  }).sort((x, y) => String(x.at) < String(y.at) ? 1 : -1).slice(0, 1000);
 }
 /* ============================================================================
  * PROJECT WEBSITE (.html) — returns the file so the app can show it in a

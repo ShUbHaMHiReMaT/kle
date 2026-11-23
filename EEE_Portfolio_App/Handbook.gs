@@ -36,7 +36,7 @@ var ADMIN_EMAILS = [];
 var HIDDEN_ADMIN_EMAILS = [];
 /* Bump this whenever defaultStages_() changes: the live portfolio structure is
  * refreshed automatically on the next request (saved student records are kept). */
-var STRUCTURE_VERSION = '6';
+var STRUCTURE_VERSION = '7';
 /* ---------------------------------------------------------------------------
  * THEMES (Handbook Ch. 2, 3, 5.2, 6, 8)
  * ------------------------------------------------------------------------- */

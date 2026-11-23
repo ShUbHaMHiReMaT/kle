@@ -10,6 +10,18 @@
   /* ==========================================================================
    * 1. Client-side hardening (deterrents — real security is server-side)
    * ======================================================================== */
+  /* EEE symbol box: students cannot paste, so every symbol they need is one click away. */
+  const SYMBOLS = [
+    ['Greek', 'α β γ δ ε ζ η θ κ λ μ ν ξ π ρ σ τ φ χ ψ ω Γ Δ Θ Λ Π Σ Φ Ψ Ω'],
+    ['Units', 'Ω kΩ MΩ mΩ µ µF nF pF mH µH s ms µs ns Hz kHz MHz V mV kV A mA µA W mW kW VA VAr kWh Wh Ah mAh °C K dB rpm rad/s N·m Wb T'],
+    ['Maths', '± ∓ × ÷ · √ ∛ ∞ ≈ ≠ ≡ ≤ ≥ ≪ ≫ ∝ ∑ ∏ ∫ ∮ ∂ ∇ ∆ ∠ ⊥ ∥ ° ′ ″ % ‰ ½ ¼ ¾ ∈ ∴ ∵'],
+    ['Arrows', '→ ← ↔ ↑ ↓ ⇒ ⇐ ⇔ ⟶ ↗ ↘'],
+    ['Powers', '⁰ ¹ ² ³ ⁴ ⁵ ⁶ ⁷ ⁸ ⁹ ⁺ ⁻ ⁼ ⁽ ⁾ ⁿ ˣ'],
+    ['Subscripts', '₀ ₁ ₂ ₃ ₄ ₅ ₆ ₇ ₈ ₉ ₊ ₋ ₌ ₍ ₎ ₐ ₑ ₒ ₓ ₙ ₘ ₖ ₗ ₚ ₛ ₜ'],
+    ['Electrical', '∿ ⎓ ⏚ ⌁ ↯ ϕ ⊕ ⊗ ⊙ ¬ ∧ ∨ ⊻ ‖']
+  ];
+  const SYMBOL_SET = {};
+  SYMBOLS.forEach(g => g[1].split(' ').forEach(x => { if (x) SYMBOL_SET[x] = 1; }));
   const Guard = (function () {
     const isField = t => t && (t.closest && t.closest('input, textarea, select, [contenteditable="true"]'));
     // Right-click disabled everywhere
@@ -51,7 +63,13 @@
     const texty = t => !!t && (t.tagName === 'TEXTAREA' || (t.tagName === 'INPUT' && /^(text|search|email|url|tel|password)?$/i.test(t.getAttribute('type') || '')));
     const warn = msg => { const n = Date.now(); if (n - lastWarn > 2000) { lastWarn = n; toast(msg || 'Pasting is not allowed — please type your answer in your own words.', 'bad'); } };
     const stop = (e, msg) => { e.preventDefault(); e.stopImmediatePropagation(); warn(msg); };
-    document.addEventListener('paste', e => { if (pasteBlocked(e.target)) stop(e); }, true);
+    const oneSymbol = t => { const v = String(t || '').trim(); return !!v && v.length <= 6 && !!SYMBOL_SET[v]; };
+    document.addEventListener('paste', e => {
+      if (!pasteBlocked(e.target)) return;
+      let txt = ''; try { txt = (e.clipboardData || window.clipboardData).getData('text'); } catch (x) { txt = ''; }
+      if (oneSymbol(txt)) return;   // a single symbol from the Ω Symbols box is fine
+      stop(e);
+    }, true);
     document.addEventListener('drop', e => { if (pasteBlocked(e.target)) stop(e); }, true);
     // copy / cut: blocked everywhere for students; outside fields for everyone else
     ['copy', 'cut'].forEach(ev => document.addEventListener(ev, e => {
@@ -70,7 +88,11 @@
     document.addEventListener('focusin', e => { if (pasteBlocked(e.target) && texty(e.target)) take(e.target); }, true);
     document.addEventListener('beforeinput', e => {
       if (!pasteBlocked(e.target)) return;
-      if (/^insertFrom(Paste|Drop|PasteAsQuotation|YankRing)$/.test(e.inputType || '')) { stop(e); return; }
+      if (/^insertFrom(Paste|Drop|PasteAsQuotation|YankRing)$/.test(e.inputType || '')) {
+        let txt = e.data || ''; try { if (!txt && e.dataTransfer) txt = e.dataTransfer.getData('text/plain'); } catch (x) { txt = ''; }
+        if (e.inputType === 'insertFromPaste' && oneSymbol(txt)) return;
+        stop(e); return;
+      }
       if ((e.inputType === 'insertText' || e.inputType === 'insertReplacementText') && e.data && e.data.length > MAX_BURST) { stop(e); return; }
       if (texty(e.target)) take(e.target);
     }, true);
@@ -422,6 +444,46 @@
         contentEl,
         el('footer', { class: 'app-foot' }, el('span', null, '© ' + new Date().getFullYear() + ' ' + d.institution + ' · ' + d.name), el('span', null, d.cycleName + ' · Handbook ' + d.handbookVersion))));
     clear(root).appendChild(appEl);
+    appEl.appendChild(symbolBox());
+  }
+  /* ---------- Ω Symbols box: click a symbol -> typed at the cursor AND copied to the clipboard ---------- */
+  let lastField = null;
+  document.addEventListener('focusin', e => {
+    const t = e.target;
+    if (t && (t.tagName === 'TEXTAREA' || (t.tagName === 'INPUT' && /^(text|search|url|email)?$/i.test(t.getAttribute('type') || ''))) && !(t.closest && t.closest('.sym-panel'))) lastField = t;
+  }, true);
+  function insertSymbol(sym) {
+    const f = lastField;
+    let typed = false;
+    if (f && document.body.contains(f) && !f.disabled && !f.readOnly) {
+      const a = f.selectionStart === null || f.selectionStart === undefined ? f.value.length : f.selectionStart;
+      const b = f.selectionEnd === null || f.selectionEnd === undefined ? a : f.selectionEnd;
+      f.value = f.value.slice(0, a) + sym + f.value.slice(b);
+      try { f.setSelectionRange(a + sym.length, a + sym.length); } catch (x) { /* ignore */ }
+      f.dispatchEvent(new Event('input', { bubbles: true }));   // marks the worksheet as changed
+      try { f.focus(); } catch (x) { /* ignore */ }
+      typed = true;
+    }
+    let copied = false;
+    try { if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(sym).then(() => {}, () => {}); copied = true; } } catch (x) { copied = false; }
+    toast((typed ? sym + ' typed' : sym + ' copied — click in a box and paste') + (typed && copied ? ' (also copied)' : ''), 'ok');
+  }
+  function symbolBox() {
+    const panel = el('div', { class: 'sym-panel card', role: 'dialog', 'aria-label': 'Symbols', style: { position: 'fixed', right: '16px', bottom: '74px', width: '360px', maxWidth: 'calc(100vw - 32px)', maxHeight: '60vh', overflowY: 'auto', zIndex: 60, display: 'none', padding: '10px 12px', boxShadow: '0 12px 32px rgba(0,0,0,.25)' } });
+    const head = el('div', { class: 'row between', style: { marginBottom: '6px' } }, el('b', null, 'Ω EEE symbols'), el('button', { class: 'btn ghost sm', 'aria-label': 'Close symbols', onclick: () => { panel.style.display = 'none'; } }, icon('x')));
+    panel.appendChild(head);
+    panel.appendChild(el('div', { class: 'tiny muted', style: { marginBottom: '8px' } }, 'Click where you are typing, then click a symbol — it is typed there and copied to the clipboard.'));
+    SYMBOLS.forEach(g => {
+      panel.appendChild(el('div', { class: 'tiny muted', style: { margin: '8px 0 4px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.04em' } }, g[0]));
+      const row = el('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '4px' } });
+      g[1].split(' ').filter(Boolean).forEach(sym => row.appendChild(el('button', { type: 'button', class: 'btn sm', title: 'Insert ' + sym, style: { minWidth: '34px', padding: '4px 7px', fontSize: '15px', justifyContent: 'center' },
+        onmousedown: e => e.preventDefault(),   // keep the cursor in the answer box
+        onclick: () => insertSymbol(sym) }, sym)));
+      panel.appendChild(row);
+    });
+    const btn = el('button', { class: 'btn primary', title: 'EEE symbols (Ω, µ, ≤, √ …)', 'aria-label': 'Open symbols', style: { position: 'fixed', right: '16px', bottom: '16px', zIndex: 61, borderRadius: '24px', padding: '10px 16px', boxShadow: '0 6px 18px rgba(0,0,0,.25)' },
+      onmousedown: e => e.preventDefault(), onclick: () => { panel.style.display = panel.style.display === 'none' ? 'block' : 'none'; } }, 'Ω Symbols');
+    return el('div', null, panel, btn);
   }
   function announceBell() {
     const wrap = el('button', { class: 'btn ghost sm', style: { position: 'relative' }, title: 'Announcements', 'aria-label': 'Announcements', onclick: showAnnouncements }, icon('bell'));
@@ -1064,7 +1126,7 @@
     const isStudent = u.role === 'student';
     const stages = stageList();
     const stageSel = select(stages.map(s => ({ v: s.id, l: s.code + ' — ' + s.title })), S.stageId || (stages[0] || {}).id);
-    const modeOpts = (isStudent ? [{ v: 'quiz', l: 'Timed quiz on my project — ' + (S.boot.settings.quizSeconds || 45) + ' s per question, score /10' }, { v: 'mentor', l: 'Ask about my project (mentor analyses & suggests)' }] : [{ v: 'mentor', l: 'Ask about the project (mentor analyses & suggests)' }])
+    const modeOpts = (isStudent ? [{ v: 'quiz', l: 'Quiz on my project — Easy / Medium / Hard · Written or MCQ · score /10' }, { v: 'mentor', l: 'Ask about my project (mentor analyses & suggests)' }] : [{ v: 'mentor', l: 'Ask about the project (mentor analyses & suggests)' }])
       .concat([
         { v: 'reasoning', l: 'Technical Reasoning' },
         { v: 'foundation', l: 'Foundation Connection' },
@@ -1138,36 +1200,62 @@
     const stopTimer = () => { if (timer) { clearInterval(timer); timer = null; } };
     const quizIdle = () => {
       stopTimer(); QZ = null;
-      const start = el('button', { class: 'btn primary' }, icon('star'), 'Start quiz on my ' + stageCode() + ' entries');
+      const start = el('button', { class: 'btn primary' }, icon('star'), 'Start quiz on my ' + stageCode() + ' work');
+      const pick = (name, opts, val) => {   // simple segmented buttons
+        const wrap = el('div', { class: 'row', style: { gap: '6px' }, role: 'radiogroup', 'aria-label': name });
+        wrap.value = val;
+        const draw = () => { clear(wrap); opts.forEach(o => wrap.appendChild(el('button', { type: 'button', class: 'btn sm ' + (wrap.value === o[0] ? 'primary' : ''), role: 'radio', 'aria-checked': String(wrap.value === o[0]), title: o[2] || '', onclick: () => { wrap.value = o[0]; pref('eee_quiz_' + name, o[0]); draw(); } }, o[1]))); };
+        draw(); return wrap;
+      };
+      const levelPick = pick('level', [['easy', '🟢 Easy', 'Basic recall and understanding'], ['medium', '🟡 Medium', 'Apply and explain why'], ['hard', '🔴 Hard', 'Calculations, trade-offs, what-if']], pref('eee_quiz_level') || 'medium');
+      const typePick = pick('format', [['written', '✍️ Written', 'Type your answer; the AI mentor marks it'], ['mcq', '🔘 MCQ', 'Choose one of four options; marked instantly']], pref('eee_quiz_format') || 'written');
       start.onclick = async () => {
-        busy(start, true, 'Preparing questions from your ' + stageCode() + ' entries…');
-        try { const r = await call('quizStart', { teamId: T.team.id, stageId: stageSel.value }); pushLog(r.log); showQuestion(r); }
+        busy(start, true, 'Preparing ' + levelPick.value + ' ' + (typePick.value === 'mcq' ? 'MCQ' : 'written') + ' questions on your ' + stageCode() + ' work…');
+        try { const r = await call('quizStart', { teamId: T.team.id, stageId: stageSel.value, level: levelPick.value, format: typePick.value }); pushLog(r.log); showQuestion(r); }
         catch (e) { busy(start, false); toast(e.message, 'bad'); }
       };
+      const timed = !!S.boot.settings.quizTimed;
       clear(quizBox).appendChild(el('div', { class: 'stack' },
-        el('div', null, el('b', null, 'Timed quiz on what your team wrote in ' + stageCode()),
+        el('div', null, el('b', null, 'Quiz on your project and what your team wrote in ' + stageCode()),
           el('ul', { class: 'small muted', style: { margin: '6px 0 0', paddingLeft: '18px' } },
             el('li', null, 'The mentor asks ' + (S.boot.settings.quizQuestions || 5) + ' questions, one at a time: first about what you typed in your ' + stageCode() + ' entries, then about your project, then from the department textbooks. Each question shows where it comes from (e.g. “Textbook: Power Electronics – Hart”).'),
-            el('li', null, 'You have ' + (S.boot.settings.quizSeconds || 45) + ' seconds for each question. When time runs out, your answer is sent automatically.'),
+            el('li', null, 'Pick your level — Easy, Medium or Hard — and the type: Written (you type the answer) or MCQ (choose one of four options). Your guide and HoD can see which level and type you chose.'),
+            el('li', null, timed ? 'You have ' + (S.boot.settings.quizSeconds || 45) + ' seconds for each question. When time runs out, your answer is sent automatically.' : 'There is no time limit — take your time and think it through.'),
             el('li', null, 'You can also ask the mentor your own questions — choose “Ask the mentor a question” above, or click “Ask about this answer” after any question.'),
             el('li', null, 'After every answer the mentor tells you what was right or wrong and shows the correct way to answer.'),
-            el('li', null, 'At the end you get a score out of 10. Typing only — pasting is disabled.'))),
+            el('li', null, 'At the end you get a score out of 10. Typing only — pasting is disabled. Use the Ω Symbols button for Ω, µ, ≤, √ and other symbols.'))),
+        el('div', { class: 'grid g2', style: { gap: '10px' } }, el('div', null, el('div', { class: 'tiny muted', style: { marginBottom: '4px' } }, 'Level'), levelPick), el('div', null, el('div', { class: 'tiny muted', style: { marginBottom: '4px' } }, 'Type'), typePick)),
         el('div', null, start)));
     };
     const showQuestion = r => {
       stopTimer();
       QZ = { id: r.quizId, index: r.index, total: r.total };
-      const ans = el('textarea', { rows: 3, placeholder: 'Type your answer in your own words… (Enter to submit)' });
-      const bar = el('div', { class: 'qtimer' }, el('i'));
-      const secs = el('span', { class: 'qsecs' }, r.seconds + ' s');
+      const isMcq = Array.isArray(r.options);
+      const timedQ = (r.limit || 0) > 0;
+      let choice = -1;
+      const ans = isMcq ? el('div', { class: 'stack', role: 'radiogroup', 'aria-label': 'Options', style: { gap: '6px' } })
+                        : el('textarea', { rows: 3, placeholder: 'Type your answer in your own words… (Enter to submit)' });
+      if (isMcq) {
+        const drawOpts = () => { clear(ans); r.options.forEach((o, k) => ans.appendChild(el('button', { type: 'button', class: 'btn', role: 'radio', 'aria-checked': String(choice === k),
+          style: { justifyContent: 'flex-start', textAlign: 'left', whiteSpace: 'normal', height: 'auto', padding: '10px 12px', borderColor: choice === k ? 'var(--brand)' : '', background: choice === k ? 'var(--brand-soft, rgba(37,99,235,.12))' : '' },
+          onclick: () => { if (ans.disabled) return; choice = k; drawOpts(); } }, el('b', { style: { marginRight: '8px' } }, 'ABCD'[k] + ')'), plainMath(o)))); };
+        drawOpts();
+      }
+      const bar = timedQ ? el('div', { class: 'qtimer' }, el('i')) : null;
+      const secs = timedQ ? el('span', { class: 'qsecs' }, r.seconds + ' s') : el('span', { class: 'tiny muted' }, 'No time limit');
       const submit = el('button', { class: 'btn primary' }, icon('send'), 'Submit answer');
       clear(quizBox).appendChild(el('div', { class: 'stack' },
-        el('div', { class: 'row between' }, el('span', { class: 'badge brand' }, 'Question ' + (r.index + 1) + ' of ' + r.total), r.sourceLabel ? el('span', { class: 'badge ' + (r.kind === 'book' ? 'ok' : r.kind === 'inputs' ? 'warn' : ''), title: 'Where this question comes from' }, (r.kind === 'book' ? '📘 ' : r.kind === 'inputs' ? '✍️ ' : '🛠️ ') + r.sourceLabel) : null, r.entry ? el('span', { class: 'badge' }, 'About: ' + plainMath(r.entry)) : null, el('span', { style: { flex: 1 } }), secs),
-        bar, el('div', { class: 'quiz-q selectable' }, plainMath(r.question)), ans, el('div', { class: 'row' }, submit, el('span', { class: 'tiny muted' }, 'Answer in 1–2 sentences.'))));
+        el('div', { class: 'row between' }, el('span', { class: 'badge brand' }, 'Question ' + (r.index + 1) + ' of ' + r.total), r.sourceLabel ? el('span', { class: 'badge ' + (r.kind === 'book' ? 'ok' : r.kind === 'inputs' ? 'warn' : ''), title: 'Where this question comes from' }, (r.kind === 'book' ? '📘 ' : r.kind === 'inputs' ? '✍️ ' : '🛠️ ') + r.sourceLabel) : null, r.entry ? el('span', { class: 'badge' }, 'About: ' + plainMath(r.entry)) : null, r.levelLabel ? el('span', { class: 'badge' }, r.levelLabel + (isMcq ? ' · MCQ' : ' · Written')) : null, el('span', { style: { flex: 1 } }), secs),
+        bar, el('div', { class: 'quiz-q selectable' }, plainMath(r.question)), ans, el('div', { class: 'row' }, submit, el('span', { class: 'tiny muted' }, isMcq ? 'Choose one option, then submit.' : 'Answer in 1–2 sentences.'))));
       const full = r.limit || r.seconds, deadline = Date.now() + r.seconds * 1000;
       let sent = false;
-      const fire = auto => { if (sent) return; sent = true; stopTimer(); answer(ans.value.trim(), auto, submit, ans); };
-      timer = setInterval(() => {
+      const fire = auto => {
+        if (sent) return;
+        if (isMcq && choice < 0 && !auto) { toast('Choose an option first.', 'bad'); return; }
+        sent = true; stopTimer();
+        answer(isMcq ? { choice: choice } : { answer: ans.value.trim() }, auto, submit, ans);
+      };
+      if (timedQ) timer = setInterval(() => {
         if (!document.body.contains(quizBox)) { stopTimer(); return; }
         const left = Math.max(0, (deadline - Date.now()) / 1000);
         bar.firstChild.style.width = (left / full * 100) + '%';
@@ -1176,19 +1264,19 @@
         if (left <= 0) fire(true);
       }, 200);
       submit.onclick = () => fire(false);
-      ans.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); fire(false); } });
-      setTimeout(() => ans.focus(), 50);
+      if (!isMcq) { ans.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); fire(false); } }); setTimeout(() => ans.focus(), 50); }
     };
-    const answer = async (text, auto, submitBtn, ans) => {
-      ans.disabled = true; busy(submitBtn, true, auto ? 'Time up — sending…' : 'Checking…');
+    const answer = async (payload, auto, submitBtn, ans) => {
+      ans.disabled = true; ans.querySelectorAll && ans.querySelectorAll('button').forEach(b => { b.disabled = true; });
+      busy(submitBtn, true, auto ? 'Time up — sending…' : 'Checking…');
       quizBox.appendChild(el('div', { class: 'small muted row' }, el('span', { class: 'typing' }, el('i'), el('i'), el('i')), ' The mentor is checking your answer…'));
       try {
-        const r = await call('quizAnswer', { quizId: QZ.id, index: QZ.index, answer: text });
+        const r = await call('quizAnswer', Object.assign({ quizId: QZ.id, index: QZ.index }, payload));
         pushLog(r.log); showFeedback(r);
       } catch (e) {
         toast(e.message, 'bad');
         const retry = el('button', { class: 'btn' }, icon('refresh'), 'Try again');
-        retry.onclick = () => { retry.remove(); answer(text, auto, submitBtn, ans); };   // server keeps the original answer & time
+        retry.onclick = () => { retry.remove(); answer(payload, auto, submitBtn, ans); };   // server keeps the original answer & time
         quizBox.appendChild(el('div', { style: { marginTop: '8px' } }, retry));
       }
     };
@@ -1197,7 +1285,7 @@
       const body = el('div', { class: 'stack' },
         el('div', { class: 'row' }, el('span', { class: 'badge ' + cls }, (r.mark === 2 ? '✅ ' : r.mark === 1 ? '🟡 ' : '❌ ') + r.mark + '/2 — ' + r.verdict), el('span', { class: 'tiny muted' }, r.late ? 'Time ran out' : 'Answered in ' + r.seconds + ' s')),
         r.feedback ? el('div', { class: 'selectable' }, plainMath(r.feedback)) : null,
-        r.correct ? el('div', { class: 'alert ok', style: { display: 'block' } }, el('b', null, 'The correct way to answer: '), plainMath(r.correct)) : null,
+        r.correct ? el('div', { class: 'alert ok', style: { display: 'block' } }, el('b', null, r.format === 'mcq' ? 'The correct answer: ' : 'The correct way to answer: '), plainMath(r.correct)) : null,
         r.reference ? el('div', { class: 'info-box small', style: { borderLeft: '3px solid var(--brand)' } }, '📘 ', el('b', null, 'Reference: '), plainMath(r.reference)) : null,
         r.sourceLabel ? el('div', { class: 'tiny muted' }, 'Question source: ' + r.sourceLabel) : null,
         el('div', null, el('button', { class: 'btn sm', onclick: () => askAbout(r) }, icon('msg'), 'Ask about this answer')));
@@ -1216,7 +1304,7 @@
           try { const q = await call('quizNext', { quizId: QZ.id }); pushLog(q.log); showQuestion(q); }
           catch (e) { busy(next, false); toast(e.message, 'bad'); }
         };
-        body.appendChild(el('div', null, next, el('span', { class: 'tiny muted', style: { marginLeft: '10px' } }, 'Your ' + (S.boot.settings.quizSeconds || 45) + ' seconds start when you open the next question.')));
+        body.appendChild(el('div', null, next, el('span', { class: 'tiny muted', style: { marginLeft: '10px' } }, S.boot.settings.quizTimed ? 'Your ' + (S.boot.settings.quizSeconds || 45) + ' seconds start when you open the next question.' : 'No time limit.')));
       }
       clear(quizBox).appendChild(body);
     };
@@ -1304,7 +1392,7 @@
     drawAdmin();
   }
   function drawAdmin() {
-    const tabs = [['faculty', 'Faculty'], ['students', 'Students'], ['teams', 'Teams'], ['announce', 'Announcements'], ['gemini', 'Gemini AI'], ['settings', 'Settings'], ['audit', 'Audit log']]
+    const tabs = [['faculty', 'Faculty'], ['students', 'Students'], ['teams', 'Teams'], ['announce', 'Announcements'], ['quizzes', 'Quiz results'], ['gemini', 'Gemini AI'], ['settings', 'Settings'], ['audit', 'Audit log']]
       .filter(t => S.boot.user.role === 'admin' || (t[0] !== 'gemini' && t[0] !== 'settings'));
     if (!tabs.some(t => t[0] === S.adminTab)) S.adminTab = 'faculty';
     const c = clear(contentEl);
@@ -1312,7 +1400,7 @@
       el('button', { class: 'btn primary', onclick: () => reminderModal() }, icon('send'), 'Send reminder')));
     c.appendChild(el('div', { class: 'tabs' }, tabs.map(t => el('button', { class: S.adminTab === t[0] ? 'active' : '', onclick: () => { S.adminTab = t[0]; drawAdmin(); } }, t[1]))));
     const pane = el('div'); c.appendChild(pane);
-    ({ faculty: admFaculty, students: admStudents, teams: admTeams, announce: admAnnounce, gemini: admGemini, settings: admSettings, audit: admAudit })[S.adminTab](pane);
+    ({ faculty: admFaculty, students: admStudents, teams: admTeams, announce: admAnnounce, quizzes: admQuizzes, gemini: admGemini, settings: admSettings, audit: admAudit })[S.adminTab](pane);
   }
   const A = () => S.admin;
   const facName = id => (A().faculty.filter(f => f.id === id)[0] || {}).name || '';
@@ -1560,18 +1648,44 @@
     drawList();
   }
 
+  /* ----- Quiz results: who took which level / type, and the score ----- */
+  async function admQuizzes(pane) {
+    pane.appendChild(loader('Loading quiz results…'));
+    let rows = [];
+    try { rows = await call('quizResults'); } catch (e) { clear(pane).appendChild(el('div', { class: 'alert bad' }, e.message)); return; }
+    const q = el('input', { type: 'text', placeholder: 'Search student or SRN…', style: { maxWidth: '220px' } });
+    const tf = select([{ v: '', l: 'All teams' }].concat(A().teams.map(t => ({ v: t.id, l: t.name }))), '', { style: { maxWidth: '160px' } });
+    const lf = select([{ v: '', l: 'All levels' }, 'Easy', 'Medium', 'Hard'], '', { style: { maxWidth: '140px' } });
+    const ff = select([{ v: '', l: 'All types' }, 'Written', 'MCQ'], '', { style: { maxWidth: '130px' } });
+    const holder = el('div'), stats = el('div', { class: 'row', style: { margin: '0 0 12px' } });
+    const draw = () => {
+      const s = q.value.toLowerCase();
+      const list = rows.filter(r => (!tf.value || r.teamId === tf.value) && (!lf.value || r.level === lf.value) && (!ff.value || r.format === ff.value) && (!s || (r.student + ' ' + r.usn).toLowerCase().indexOf(s) >= 0));
+      clear(stats);
+      ['Easy', 'Medium', 'Hard'].forEach(L => { const d = list.filter(r => r.level === L && r.status === 'done'); const avg = d.length ? Math.round(d.reduce((n, r) => n + Number(r.score || 0), 0) / d.length * 10) / 10 : '—';
+        stats.appendChild(el('span', { class: 'badge ' + (L === 'Easy' ? 'ok' : L === 'Medium' ? 'warn' : 'bad') }, L + ': ' + list.filter(r => r.level === L).length + ' quiz(zes) · avg ' + avg + '/10')); });
+      clear(holder).appendChild(tableCard('Quiz results (' + list.length + ')', el('div', { class: 'row' }, q, tf, lf, ff), ['When', 'Student', 'Team', 'Stage', 'Level', 'Type', 'Timing', 'Score', 'Status'],
+        list.map(r => el('tr', null, el('td', { class: 'tiny' }, fmt(r.at)), el('td', null, el('b', null, r.student), el('div', { class: 'tiny muted' }, r.usn)), el('td', { class: 'small' }, r.team), el('td', null, el('span', { class: 'badge brand mono' }, r.stage)),
+          el('td', null, el('span', { class: 'badge ' + (r.level === 'Easy' ? 'ok' : r.level === 'Medium' ? 'warn' : 'bad') }, r.level)), el('td', null, r.format), el('td', { class: 'small' }, r.timed ? 'Timed' : 'No limit'),
+          el('td', null, r.status === 'done' ? el('b', null, r.score + '/10') : el('span', { class: 'muted' }, r.answered + '/' + r.total + ' answered')),
+          el('td', null, el('span', { class: 'badge ' + (r.status === 'done' ? 'ok' : r.status === 'running' ? 'warn' : '') }, r.status === 'done' ? 'Finished' : r.status === 'running' ? 'In progress' : 'Left early')))), 'No quizzes taken yet.'));
+    };
+    [q].forEach(x => x.oninput = draw); [tf, lf, ff].forEach(x => x.onchange = draw);
+    clear(pane); pane.appendChild(stats); pane.appendChild(holder); draw();
+  }
   function admSettings(pane) {
     const st = A().settings;
-    const i = { gates: el('input', { type: 'checkbox', checked: st.enforceGates }), marks: el('input', { type: 'checkbox', checked: st.showMarksToStudents }), otp: el('input', { type: 'checkbox', checked: st.allowOtpLogin }), qs: el('input', { type: 'number', min: 15, max: 300, value: st.quizSeconds || 45, style: { width: '80px' } }), qn: el('input', { type: 'number', min: 3, max: 10, value: st.quizQuestions || 5, style: { width: '80px' } }), sf: el('input', { type: 'url', value: st.staffFolderUrl || '', placeholder: 'https://drive.google.com/drive/folders/…' }) };
+    const i = { gates: el('input', { type: 'checkbox', checked: st.enforceGates }), marks: el('input', { type: 'checkbox', checked: st.showMarksToStudents }), otp: el('input', { type: 'checkbox', checked: st.allowOtpLogin }), qs: el('input', { type: 'number', min: 15, max: 300, value: st.quizSeconds || 45, style: { width: '80px' } }), qn: el('input', { type: 'number', min: 3, max: 10, value: st.quizQuestions || 5, style: { width: '80px' } }), tm: el('input', { type: 'checkbox', checked: !!st.quizTimed }), sf: el('input', { type: 'url', value: st.staffFolderUrl || '', placeholder: 'https://drive.google.com/drive/folders/…' }) };
     i.sf.dataset.allowpaste = '1';
     const save = el('button', { class: 'btn primary' }, icon('check'), 'Save settings');
-    save.onclick = async () => { busy(save, true, 'Saving…'); try { A().settings = await call('saveSettings', { enforceGates: i.gates.checked, showMarksToStudents: i.marks.checked, allowOtpLogin: i.otp.checked, quizSeconds: i.qs.value, quizQuestions: i.qn.value, staffFolderUrl: i.sf.value.trim() }); await reloadBoot(); toast('Saved.', 'ok'); } catch (e) { toast(e.message, 'bad'); } busy(save, false); };
+    save.onclick = async () => { busy(save, true, 'Saving…'); try { A().settings = await call('saveSettings', { enforceGates: i.gates.checked, showMarksToStudents: i.marks.checked, allowOtpLogin: i.otp.checked, quizSeconds: i.qs.value, quizQuestions: i.qn.value, quizTimed: i.tm.checked, staffFolderUrl: i.sf.value.trim() }); await reloadBoot(); toast('Saved.', 'ok'); } catch (e) { toast(e.message, 'bad'); } busy(save, false); };
     pane.appendChild(el('div', { class: 'grid g2' },
       el('div', { class: 'card' }, el('div', { class: 'card-h' }, el('h3', null, 'Portfolio rules')), el('div', { class: 'card-b' },
         el('label', { class: 'check' }, i.gates, el('span', null, el('b', null, 'Enforce review hard gates'), el('div', { class: 'small muted' }, 'Handbook 7.2: S6 and S7 stay locked for students until Review 3 is cleared.'))),
         el('label', { class: 'check' }, i.marks, el('span', null, el('b', null, 'Show marks to students'), el('div', { class: 'small muted' }, 'Decisions and feedback are always visible; marks only when enabled.'))),
         el('label', { class: 'check' }, i.otp, el('span', null, el('b', null, 'Allow email-code sign-in'), el('div', { class: 'small muted' }, 'Fallback for users whose Google identity is not shared with the app (e.g. personal Gmail).'))),
-        el('div', { style: { marginTop: '8px', paddingTop: '8px', borderTop: '1px solid var(--line)' } }, el('h4', null, 'AI quiz'), el('div', { class: 'grid g2', style: { marginTop: '6px' } }, field('Seconds per question', i.qs, 'How long each student gets to answer (15–300).'), field('Questions per quiz', i.qn, 'How many questions each quiz has (3–10).'))),
+        el('div', { style: { marginTop: '8px', paddingTop: '8px', borderTop: '1px solid var(--line)' } }, el('h4', null, 'AI quiz'), el('label', { class: 'check', style: { marginTop: '6px' } }, i.tm, el('span', null, el('b', null, 'Time each question (countdown)'), el('div', { class: 'small muted' }, 'Off = no time limit. On = each question has the seconds below and is sent automatically when time runs out. Students choose Easy / Medium / Hard and Written / MCQ themselves.'))),
+          el('div', { class: 'grid g2', style: { marginTop: '6px' } }, field('Seconds per question (when timed)', i.qs, 'How long each student gets to answer (15–300).'), field('Questions per quiz', i.qn, 'How many questions each quiz has (3–10).'))),
         el('div', { style: { marginTop: '8px', paddingTop: '8px', borderTop: '1px solid var(--line)' } }, el('h4', null, 'Staff shared folder'), field('Google Drive folder link (staff only)', i.sf, 'Shown to all staff in the menu and on the dashboard; never sent to students. Also share the folder itself with the staff emails in Google Drive.')),
         el('div', { style: { marginTop: '12px' } }, save))),
       el('div', { class: 'card' }, el('div', { class: 'card-h' }, el('h3', null, 'Department & backend')), el('div', { class: 'card-b' },
