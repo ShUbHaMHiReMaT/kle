@@ -38,7 +38,7 @@ const DEFAULT_SETTINGS = {
   allowOtpLogin: true,
   quizSeconds: 45, quizQuestions: 5,
   // Shared Google Drive folder for ALL staff (faculty, coordinators, reviewers, HoD) — hidden from students.
-  staffFolderUrl: 'https://drive.google.com/drive/folders/1pACuNd3e2QCBC-2Q9-blzSCqfEBz332a?usp=drive_link'
+  staffFolderUrl: 'https://drive.google.com/drive/folders/1pACuNd3e2QCBC-2Q9-blzSCqfEBz332a?usp=sharing'
 };
 /* ============================================================================
  * WEB APP
