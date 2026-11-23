@@ -30,10 +30,10 @@ var DEPARTMENT = Object.freeze({
 });
 /* Permanent HoD/Admin accounts (in addition to the script owner).
  * These always get full admin access, even if not added in the Faculty tab. */
-var ADMIN_EMAILS = ['shreyashalingali@gmail.com'];
+var ADMIN_EMAILS = [];
 /* Admins whose access is NOT shown to anyone else (hidden from the Audit log and
  * shown only as "Portfolio Administrator" in comments and reviews). */
-var HIDDEN_ADMIN_EMAILS = ['shreyashalingali@gmail.com'];
+var HIDDEN_ADMIN_EMAILS = [];
 /* Bump this whenever defaultStages_() changes: the live portfolio structure is
  * refreshed automatically on the next request (saved student records are kept). */
 var STRUCTURE_VERSION = '6';

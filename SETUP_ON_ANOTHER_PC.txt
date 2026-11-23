@@ -100,11 +100,11 @@ STEP 4 - Who is the admin?  (optional)
  The Google account that owns the project is ALWAYS the admin.
  To add more admins, open  Handbook.gs  and find this line:
 
-     var ADMIN_EMAILS = ['shreyashalingali@gmail.com'];
+     var ADMIN_EMAILS = [];
 
  Add more emails inside the brackets, like this:
 
-     var ADMIN_EMAILS = ['shreyashalingali@gmail.com', 'hod@kletech.ac.in'];
+     var ADMIN_EMAILS = ['hod@kletech.ac.in'];
 
  Press Ctrl + S.
 

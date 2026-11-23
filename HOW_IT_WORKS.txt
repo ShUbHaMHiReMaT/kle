@@ -16,8 +16,8 @@ WHO USES IT?  (4 KINDS OF PEOPLE)
    - Can see EVERYTHING.
    - Adds teachers, adds students, makes teams.
    - Puts in the department AI key and changes the settings.
-   - Admin emails: the owner of the Google account
-     AND shreyashalingali@gmail.com
+   - Admin email: the owner of the Google account
+     (plus anyone given the role HoD/Admin in the Faculty tab)
 
 2. CO-ORDINATOR and REVIEWER
    - Can open "Administration": add teachers, students, teams,

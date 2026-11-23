@@ -172,21 +172,45 @@
   function initials(n) { return String(n || '?').split(/\s+/).filter(Boolean).slice(0, 2).map(x => x[0]).join('').toUpperCase(); }
   function store(k, v) { try { if (v === undefined) return window.sessionStorage.getItem(k); if (v === null) window.sessionStorage.removeItem(k); else window.sessionStorage.setItem(k, v); } catch (e) { return null; } }
   function pref(k, v) { try { if (v === undefined) return window.localStorage.getItem(k); window.localStorage.setItem(k, v); } catch (e) { return null; } }
+  // LaTeX that the AI sometimes writes ($\le 0.15\text{ V}$) -> readable text (≤ 0.15 V). Mirrors plainMath_ in Code.gs.
+  const SYM = { le: '≤', leq: '≤', ge: '≥', geq: '≥', neq: '≠', ne: '≠', approx: '≈', pm: '±', mp: '∓', times: '×', cdot: '·', div: '÷', infty: '∞', degree: '°', circ: '°',
+    rightarrow: '→', to: '→', leftarrow: '←', Rightarrow: '⇒', propto: '∝', sum: 'Σ', int: '∫', partial: '∂', Delta: 'Δ', delta: 'δ', Omega: 'Ω', omega: 'ω', mu: 'µ', alpha: 'α', beta: 'β',
+    gamma: 'γ', theta: 'θ', phi: 'φ', varphi: 'φ', pi: 'π', tau: 'τ', eta: 'η', zeta: 'ζ', lambda: 'λ', sigma: 'σ', rho: 'ρ', epsilon: 'ε', varepsilon: 'ε', Phi: 'Φ', Sigma: 'Σ', ldots: '…', dots: '…', '%': '%' };
+  function plainMath(s) {
+    const tex = m => m
+      .replace(/\\(?:text|mathrm|mathbf|mathit|textbf|operatorname|mbox)\s*\{([^{}]*)\}/g, '$1')
+      .replace(/\\d?frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}/g, '($1)/($2)')
+      .replace(/\\sqrt\s*\{([^{}]*)\}/g, '√($1)')
+      .replace(/\^\s*\{?\\circ\}?/g, '°')
+      .replace(/\\([A-Za-z]+|%)/g, (x, w) => SYM[w] !== undefined ? SYM[w] : w)
+      .replace(/\\[,;:! ]/g, ' ')
+      .replace(/\^\{([^{}]*)\}/g, '^$1').replace(/_\{([^{}]*)\}/g, '_$1')
+      .replace(/[{}]/g, '').replace(/[ \t]{2,}/g, ' ').trim();
+    return String(s || '')
+      .replace(/\$\$([^$]{1,400}?)\$\$/g, (x, m) => tex(m))
+      .replace(/\\\(([\s\S]{1,400}?)\\\)/g, (x, m) => tex(m))
+      .replace(/\$([^$\n]{1,200}?)\$/g, (x, m) => /[\\^_{}]/.test(m) ? tex(m) : x)
+      .replace(/\\(?:text|mathrm)\s*\{([^{}]*)\}/g, '$1')
+      .replace(/\\(le|leq|ge|geq|approx|pm|times|Omega|mu|Delta|degree)\b/g, (x, w) => SYM[w]);
+  }
   function md(text) {
     // Minimal, safe markdown: escape first, then format.
-    const lines = esc(text).split(/\r?\n/);
-    let html = '', list = null;
+    const lines = esc(plainMath(text)).split(/\r?\n/);
+    let html = '', list = null, olNext = 0;
     const inline = s => s.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/(^|[^*])\*(?!\s)(.+?)\*(?!\*)/g, '$1<i>$2</i>').replace(/`([^`]+)`/g, '<code>$1</code>');
     lines.forEach(l => {
-      const ul = l.match(/^\s*[-*•]\s+(.*)$/), ol = l.match(/^\s*\d+[.)]\s+(.*)$/);
+      const ul = l.match(/^\s*[-*•]\s+(.*)$/), ol = l.match(/^\s*(\d+)[.)]\s+(.*)$/);
+      if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(l)) { if (list) { html += '</' + list + '>'; list = null; } html += '<hr style="border:0;border-top:1px solid var(--line);margin:10px 0">'; olNext = 0; return; }
       if (ul || ol) {
         const t = ul ? 'ul' : 'ol';
-        if (list !== t) { if (list) html += '</' + list + '>'; html += '<' + t + '>'; list = t; }
-        html += '<li>' + inline((ul || ol)[1]) + '</li>';
+        // keep the AI's own numbering (1, 2, 3…) even when a quote line sits between items
+        if (list !== t) { if (list) html += '</' + list + '>'; if (t === 'ol') { let n = Number(ol[1]); if (n === 1 && olNext > 1) n = olNext; olNext = n; html += '<ol start="' + n + '">'; } else html += '<ul>'; list = t; }
+        if (t === 'ol') olNext++;
+        html += '<li>' + inline(ul ? ul[1] : ol[2]) + '</li>';
       } else {
         if (list) { html += '</' + list + '>'; list = null; }
         const h = l.match(/^#{1,4}\s+(.*)$/);
-        if (h) html += '<p><b>' + inline(h[1]) + '</b></p>';
+        if (h) { html += '<p><b>' + inline(h[1]) + '</b></p>'; olNext = 0; }
         else if (l.trim()) html += '<p>' + inline(l) + '</p>';
       }
     });
@@ -1036,7 +1060,7 @@
     const isStudent = u.role === 'student';
     const stages = stageList();
     const stageSel = select(stages.map(s => ({ v: s.id, l: s.code + ' — ' + s.title })), S.stageId || (stages[0] || {}).id);
-    const modeOpts = (isStudent ? [{ v: 'quiz', l: 'Timed quiz on my saved work — 45 s per question, score /10' }, { v: 'mentor', l: 'Ask the mentor a question' }] : [{ v: 'mentor', l: 'Ask the mentor a question' }])
+    const modeOpts = (isStudent ? [{ v: 'quiz', l: 'Timed quiz on my project — ' + (S.boot.settings.quizSeconds || 45) + ' s per question, score /10' }, { v: 'mentor', l: 'Ask about my project (mentor analyses & suggests)' }] : [{ v: 'mentor', l: 'Ask about the project (mentor analyses & suggests)' }])
       .concat([
         { v: 'reasoning', l: 'Technical Reasoning' },
         { v: 'foundation', l: 'Foundation Connection' },
@@ -1119,8 +1143,8 @@
       clear(quizBox).appendChild(el('div', { class: 'stack' },
         el('div', null, el('b', null, 'Timed quiz on what your team wrote in ' + stageCode()),
           el('ul', { class: 'small muted', style: { margin: '6px 0 0', paddingLeft: '18px' } },
-            el('li', null, 'The mentor reads your saved ' + stageCode() + ' entries and asks 5 questions about them, one at a time.'),
-            el('li', null, 'You have 45 seconds for each question. When time runs out, your answer is sent automatically.'),
+            el('li', null, 'The mentor asks ' + (S.boot.settings.quizQuestions || 5) + ' questions, one at a time: first about what you typed in your ' + stageCode() + ' entries, then about your project, then from the department textbooks. Each question shows where it comes from (e.g. “Textbook: Power Electronics – Hart”).'),
+            el('li', null, 'You have ' + (S.boot.settings.quizSeconds || 45) + ' seconds for each question. When time runs out, your answer is sent automatically.'),
             el('li', null, 'You can also ask the mentor your own questions — choose “Ask the mentor a question” above, or click “Ask about this answer” after any question.'),
             el('li', null, 'After every answer the mentor tells you what was right or wrong and shows the correct way to answer.'),
             el('li', null, 'At the end you get a score out of 10. Typing only — pasting is disabled.'))),
@@ -1134,8 +1158,8 @@
       const secs = el('span', { class: 'qsecs' }, r.seconds + ' s');
       const submit = el('button', { class: 'btn primary' }, icon('send'), 'Submit answer');
       clear(quizBox).appendChild(el('div', { class: 'stack' },
-        el('div', { class: 'row between' }, el('span', { class: 'badge brand' }, 'Question ' + (r.index + 1) + ' of ' + r.total), r.entry ? el('span', { class: 'badge' }, 'About: ' + r.entry) : null, el('span', { style: { flex: 1 } }), secs),
-        bar, el('div', { class: 'quiz-q selectable' }, r.question), ans, el('div', { class: 'row' }, submit, el('span', { class: 'tiny muted' }, 'Answer in 1–2 sentences.'))));
+        el('div', { class: 'row between' }, el('span', { class: 'badge brand' }, 'Question ' + (r.index + 1) + ' of ' + r.total), r.sourceLabel ? el('span', { class: 'badge ' + (r.kind === 'book' ? 'ok' : r.kind === 'inputs' ? 'warn' : ''), title: 'Where this question comes from' }, (r.kind === 'book' ? '📘 ' : r.kind === 'inputs' ? '✍️ ' : '🛠️ ') + r.sourceLabel) : null, r.entry ? el('span', { class: 'badge' }, 'About: ' + plainMath(r.entry)) : null, el('span', { style: { flex: 1 } }), secs),
+        bar, el('div', { class: 'quiz-q selectable' }, plainMath(r.question)), ans, el('div', { class: 'row' }, submit, el('span', { class: 'tiny muted' }, 'Answer in 1–2 sentences.'))));
       const full = r.limit || r.seconds, deadline = Date.now() + r.seconds * 1000;
       let sent = false;
       const fire = auto => { if (sent) return; sent = true; stopTimer(); answer(ans.value.trim(), auto, submit, ans); };
@@ -1168,15 +1192,16 @@
       const cls = r.mark === 2 ? 'ok' : r.mark === 1 ? 'warn' : 'bad';
       const body = el('div', { class: 'stack' },
         el('div', { class: 'row' }, el('span', { class: 'badge ' + cls }, (r.mark === 2 ? '✅ ' : r.mark === 1 ? '🟡 ' : '❌ ') + r.mark + '/2 — ' + r.verdict), el('span', { class: 'tiny muted' }, r.late ? 'Time ran out' : 'Answered in ' + r.seconds + ' s')),
-        r.feedback ? el('div', { class: 'selectable' }, r.feedback) : null,
-        r.correct ? el('div', { class: 'alert ok', style: { display: 'block' } }, el('b', null, 'The correct way to answer: '), r.correct) : null,
+        r.feedback ? el('div', { class: 'selectable' }, plainMath(r.feedback)) : null,
+        r.correct ? el('div', { class: 'alert ok', style: { display: 'block' } }, el('b', null, 'The correct way to answer: '), plainMath(r.correct)) : null,
+        r.sourceLabel ? el('div', { class: 'tiny muted' }, 'Question source: ' + r.sourceLabel) : null,
         el('div', null, el('button', { class: 'btn sm', onclick: () => askAbout(r) }, icon('msg'), 'Ask about this answer')));
       if (r.done) {
         setScore(stageSel.value, r.score);
         const again = el('button', { class: 'btn primary', onclick: quizIdle }, icon('refresh'), 'Start a new quiz');
         body.appendChild(el('div', { class: 'info-box' },
           el('div', { class: 'row' }, el('b', null, 'Quiz finished'), scoreBadge(r.score)),
-          el('div', { class: 'small', style: { marginTop: '6px' } }, (r.results || []).map((x, k) => el('div', null, 'Q' + (k + 1) + ' — ' + x.mark + '/2 ' + (x.mark === 2 ? '✅' : x.mark === 1 ? '🟡' : '❌') + (x.late ? ' (time up)' : ' (' + x.seconds + ' s)')))),
+          el('div', { class: 'small', style: { marginTop: '6px' } }, (r.results || []).map((x, k) => el('div', null, 'Q' + (k + 1) + ' — ' + x.mark + '/2 ' + (x.mark === 2 ? '✅' : x.mark === 1 ? '🟡' : '❌') + (x.late ? ' (time up)' : ' (' + x.seconds + ' s)') + (x.sourceLabel ? ' · ' + x.sourceLabel : '')))),
           el('div', { style: { marginTop: '10px' } }, again)));
         QZ = null;
       } else {
@@ -1186,7 +1211,7 @@
           try { const q = await call('quizNext', { quizId: QZ.id }); pushLog(q.log); showQuestion(q); }
           catch (e) { busy(next, false); toast(e.message, 'bad'); }
         };
-        body.appendChild(el('div', null, next, el('span', { class: 'tiny muted', style: { marginLeft: '10px' } }, 'Your 45 seconds start when you open the next question.')));
+        body.appendChild(el('div', null, next, el('span', { class: 'tiny muted', style: { marginLeft: '10px' } }, 'Your ' + (S.boot.settings.quizSeconds || 45) + ' seconds start when you open the next question.')));
       }
       clear(quizBox).appendChild(body);
     };
@@ -1334,7 +1359,10 @@
     const holder = el('div');
     const draw = () => {
       const s = q.value.toLowerCase();
-      const rows = A().students.filter(x => (!s || [x.usn, x.name, x.email].join(' ').toLowerCase().indexOf(s) >= 0) && (!tf.value || (tf.value === '_none' ? !x.teamId : x.teamId === tf.value))).map(x =>
+      const order = {}; A().teams.forEach((t, k) => order[t.id] = k);   // teams already come in Team 1, Team 2 … order
+      const rank = x => x.teamId && order[x.teamId] !== undefined ? order[x.teamId] : 1e6;
+      const rows = A().students.filter(x => (!s || [x.usn, x.name, x.email].join(' ').toLowerCase().indexOf(s) >= 0) && (!tf.value || (tf.value === '_none' ? !x.teamId : x.teamId === tf.value)))
+        .sort((p, q) => (rank(p) - rank(q)) || String(p.usn).localeCompare(String(q.usn), undefined, { numeric: true })).map(x =>
         el('tr', null, el('td', { class: 'mono' }, x.usn), el('td', null, el('b', null, x.name)), el('td', { class: 'small' }, x.email || el('span', { class: 'badge warn' }, 'No email — cannot sign in')), el('td', null, x.teamId ? el('span', { class: 'badge brand' }, teamName(x.teamId)) : el('span', { class: 'badge warn' }, 'Unassigned')),
           el('td', null, isTrue(x.active) ? el('span', { class: 'badge ok' }, 'Active') : el('span', { class: 'badge' }, 'Inactive')),
           el('td', null, el('div', { class: 'row', style: { flexWrap: 'nowrap' } }, el('button', { class: 'btn sm', onclick: () => editStudent(x) }, icon('edit'), 'Edit'),
