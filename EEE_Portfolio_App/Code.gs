@@ -29,7 +29,6 @@ const SCHEMA = {
   Reviews:   ['id', 'teamId', 'reviewId', 'facultyEmail', 'facultyName', 'gateJson', 'bandsJson', 'lensNotes', 'marks', 'decision', 'comment', 'extraJson', 'createdAt', 'updatedAt'],
   MentorLog: ['id', 'teamId', 'stageId', 'mode', 'userEmail', 'userName', 'role', 'text', 'model', 'createdAt', 'facultyNote', 'noteBy', 'score'],
   Audit:     ['at', 'email', 'role', 'action', 'teamId', 'detail'],
-  StudyNotes: ['id', 'book', 'fileId', 'themes', 'notes', 'createdAt'],
   Announcements: ['id', 'title', 'message', 'audience', 'createdBy', 'createdAt', 'active', 'emailed'],
   Quizzes:   ['id', 'teamId', 'stageId', 'userEmail', 'userName', 'questionsJson', 'resultsJson', 'current', 'askedAt', 'pendingJson', 'status', 'score', 'model', 'createdAt', 'finishedAt']
 };
@@ -38,7 +37,8 @@ const DEFAULT_SETTINGS = {
   mentorTemperature: 0.6, enforceGates: true, showMarksToStudents: false,
   allowOtpLogin: true,
   quizSeconds: 45, quizQuestions: 5,
-  booksFolderId: '1n_fEG6FnDOQMKJFZQNoJ3gJ0YlXkII7U'   // "Mini Project Books" (core textbooks for AI quiz questions)
+  // Shared Google Drive folder for ALL staff (faculty, coordinators, reviewers, HoD) — hidden from students.
+  staffFolderUrl: 'https://drive.google.com/drive/folders/1pACuNd3e2QCBC-2Q9-blzSCqfEBz332a?usp=drive_link'
 };
 /* ============================================================================
  * WEB APP
@@ -412,11 +412,6 @@ const ACTIONS = {
   saveAnnouncement:{ roles: ['admin'], write: true, fn: (c, a) => saveAnnouncement_(c, a) },
   deleteAnnouncement:{ roles: ['admin'], write: true, fn: (c, a) => deleteAnnouncement_(c, a) },
   // AI question bank from the core textbooks (HoD/Admin)
-  booksList:       { roles: ['admin'], fn: (c, a) => booksList_(c) },
-  buildNotes:      { roles: ['admin'], write: true, ai: true, fn: (c, a) => buildNotes_(c, a) },
-  notesList:       { roles: ['admin'], fn: (c, a) => notesList_(c, a) },
-  deleteNote:      { roles: ['admin'], write: true, fn: (c, a) => deleteNote_(c, a) },
-  clearNotes:      { roles: ['admin'], write: true, fn: (c, a) => clearNotes_(c, a) },
   // admin / coordinator
   adminData:    { roles: ['admin', 'coordinator'], fn: (c) => adminData_(c) },
   saveFaculty:  { roles: ['admin', 'coordinator'], write: true, fn: (c, a) => saveFaculty_(c, a) },
@@ -491,6 +486,8 @@ function bootstrap_(ctx) {
     principles: HANDBOOK_PRINCIPLES,
     stages: stages_(ctx.role === 'admin'),
     announcements: announcementsFor_(ctx),
+    // Staff-only shared Drive folder: never sent to students.
+    staffFolderUrl: ctx.role === 'student' ? '' : (s.staffFolderUrl || ''),
     settings: { quizSeconds: quizCfg_().seconds, quizQuestions: quizCfg_().questions, enforceGates: s.enforceGates, showMarksToStudents: s.showMarksToStudents, mentorDailyLimit: s.mentorDailyLimit, mentorEnabled: keysMeta_().length > 0 || (ctx.role === 'student' && !!studentKey_(ctx)) }
   });
 }
@@ -1118,8 +1115,8 @@ function mentorSystem_(team, theme, stage, mode) {
   const modes = {
     mentor: 'MODE: STUDENT ASKS ABOUT THEIR PROJECT. First ANALYSE everything you have about this team: project title, theme and artefact, ALL their saved records across every stage, reviewer feedback and the textbook reference notes. Then answer the student\'s question clearly and correctly in simple English, tied to THEIR project (quote their own entries where relevant). '
       + 'Point out anything you notice that is wrong, missing or inconsistent (missing units or measurement methods, nominal vs measured values, broken traceability FR → S2 block → S3 measurement → S4 calculation → prediction → result, reviewer comments not yet addressed). '
-      + 'You MAY explain concepts, equations and methods; when you use a textbook, name it (e.g. "Hart, Power Electronics says …"); cite the handbook part when you state a requirement. You must NOT write their worksheet entries, final component values or report text — show the method and let them apply it. If the question is about a quiz answer, explain the correct way to answer. '
-      + 'Reply format (under 300 words):\n**Answer** — the direct answer to their question.\n**What I noticed in your project** — 1–3 bullets from their saved work (skip if nothing relevant).\n**My suggestions** — 2–4 concrete next steps (what to check, measure, calculate, read — with the book or handbook part).\n**Question for you** — one short question that checks they understood.',
+      + 'You MAY explain concepts, equations and methods; when you use a textbook, name it with the chapter (e.g. "Hart, Power Electronics, Ch.6.3 says …"); cite the handbook part when you state a requirement. You must NOT write their worksheet entries, final component values or report text — show the method and let them apply it. If the question is about a quiz answer, explain the correct way to answer. '
+      + 'Reply format (under 300 words):\n**Answer** — the direct answer to their question.\n**What I noticed in your project** — 1–3 bullets from their saved work (skip if nothing relevant).\n**My suggestions** — 2–4 concrete next steps (what to check, measure, calculate, read — with the book or handbook part).\n**Reference** — the textbook(s) and chapter(s) you used from the REFERENCE NOTES, each with one short reason why that book is the right one for this question (use its WHY THIS BOOK line), e.g. "Hart, Power Electronics, Ch.6.4 — the reference for sizing L and C in converters". If you used only the handbook, say so.\n**Question for you** — one short question that checks they understood.',
     quiz_ask: 'MODE: HANDBOOK QUIZ — ASK QUESTIONS. Ask exactly 5 numbered questions, labelled Q1 to Q5, that test this student\'s understanding of the HANDBOOK REQUIREMENTS FOR THIS STAGE and the theme content given above. '
       + 'Every question must come from the handbook content in this prompt and end with its source in square brackets, e.g. [Handbook Ch.8, S3 Part A] or [Handbook Ch.6, Theme 1 core concepts]. '
       + 'Mix: Q1–Q2 on what this stage requires and why (dependency chain, measurement before calculation, sign-off and dating rules, minimum rows, gate criteria); Q3–Q4 on the theme\'s foundational concepts / governing equations listed in the handbook; Q5 applied to the team\'s own saved records (or, if none are saved, to their artefact). '
@@ -1239,7 +1236,7 @@ function mentorChat_(ctx, a) {
     const rv = reviewFeedbackText_(team);
     if (rv) system += '\n\nREVIEWER FEEDBACK SO FAR (from faculty):\n' + rv;
     const notes = notesText_(team.themeId);
-    if (notes) system += '\n\nREFERENCE NOTES FROM THE CORE TEXTBOOKS (cite the book by name when you use it):\n' + notes;
+    if (notes) system += '\n\nREFERENCE NOTES FROM THE DEPARTMENT TEXTBOOKS (cite book + chapter and say why that book, when you use it):\n' + notes;
   }
   // Team-wise conversation history (last 12 turns)
   const hist = log.sort((x, y) => String(x.createdAt) < String(y.createdAt) ? -1 : 1).slice(-12);
@@ -1453,10 +1450,10 @@ function saveSettings_(ctx, a) {
   ['enforceGates', 'showMarksToStudents', 'allowOtpLogin'].forEach(k => { if (a[k] !== undefined) s[k] = !!a[k]; });
   if (a.quizSeconds !== undefined) s.quizSeconds = Math.max(15, Math.min(300, Math.round(Number(a.quizSeconds)) || 45));
   if (a.quizQuestions !== undefined) s.quizQuestions = Math.max(3, Math.min(10, Math.round(Number(a.quizQuestions)) || 5));
-  if (a.booksFolderId !== undefined) {
-    const m = String(a.booksFolderId).match(/[-\w]{20,}/);
-    if (!m) throw new Error('Paste the Google Drive folder link (or its ID).');
-    s.booksFolderId = m[0];
+  if (a.staffFolderUrl !== undefined) {
+    const u = clean_(a.staffFolderUrl, 500);
+    if (u && !/^https:\/\/(drive|docs)\.google\.com\//.test(u)) throw new Error('Paste a Google Drive folder link (https://drive.google.com/…).');
+    s.staffFolderUrl = u;
   }
   PROP.setProperty('APP_SETTINGS', JSON.stringify(s));
   audit_(ctx, 'saveSettings', '', s);
@@ -1602,42 +1599,33 @@ function projectContext_(team, theme) {
   if (team.title) L.push('PROJECT TITLE: ' + team.title);
   return L.join('\n');
 }
-/** Textbook study-notes for a theme (built once by the HoD), used to ground questions and marking. */
+/** Built-in textbook notes (Books.gs) for a theme: [{ book, why, notes }]. */
 function notesRows_(themeId) {
-  const all = all_('StudyNotes').filter(n => n.notes);
-  const tagged = t => String(t || '').split(',').map(x => x.trim());
-  // Notes tagged specifically for THIS theme (e.g. battery books for T5/T6) win.
-  const specific = themeId ? all.filter(n => tagged(n.themes).indexOf(themeId) >= 0) : [];
-  return specific.length ? specific : all.filter(n => tagged(n.themes).indexOf('ALL') >= 0 || (themeId && tagged(n.themes).indexOf(themeId) >= 0));
+  if (typeof BOOKS === 'undefined' || !themeId) return [];
+  return BOOKS.filter(b => b.themes.indexOf(themeId) >= 0).map(b => ({
+    book: b.title, why: b.why,
+    notes: [b.common, (b.byTheme || {})[themeId]].filter(Boolean).join('\n')
+  }));
 }
-/** Short names of the textbooks whose notes a theme uses. */
-function notesBooks_(themeId) { return notesRows_(themeId).map(n => shortBook_(n.book)); }
-/** Match the AI's "source" to a real book name ('' if it is not one of them). */
+/** Names of the textbooks a theme uses. */
+function notesBooks_(themeId) { return notesRows_(themeId).map(n => n.book); }
+/** Match the AI's "source" to a real book title ('' if it is not one of them). */
 function matchBook_(src, books) {
-  const s = String(src || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const norm = x => String(x || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const s = norm(src);
   if (!s) return '';
-  const exact = books.filter(b => b.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim() === s)[0];
+  const exact = books.filter(b => norm(b) === s)[0];
   if (exact) return exact;
   const words = s.split(' ').filter(w => w.length > 3);
   let best = '', score = 0;
-  books.forEach(b => { const bl = b.toLowerCase(); const n = words.filter(w => bl.indexOf(w) >= 0).length; if (n > score) { score = n; best = b; } });
+  books.forEach(b => { const bl = norm(b); const n = words.filter(w => bl.indexOf(w) >= 0).length; if (n > score) { score = n; best = b; } });
   return score >= Math.min(2, words.length) ? best : '';
 }
+/** Notes text for prompts: each book with WHY it is the right reference. */
 function notesText_(themeId) {
   const rows = notesRows_(themeId);
   if (!rows.length) return '';
-  // every book gets a fair share of the space, so each one can be quoted as a source
-  const share = Math.max(1500, Math.floor(16000 / rows.length));
-  return rows.map(n => '[BOOK: ' + shortBook_(n.book) + ']\n' + (n.notes.length > share ? n.notes.slice(0, share) + '\n…' : n.notes)).join('\n\n');
-}
-/** Guess which mini-project themes a book covers from its file name. */
-function autoThemes_(name) {
-  const n = String(name || '').toLowerCase().replace(/[_.\-()]+/g, ' ');   // "Power_Electronics_x.pdf" -> "power electronics x pdf"
-  if (/batter|\bbms\b|\bcells?\b|li ?ion|lifepo|state ?of ?charge|\bsoc\b|energy ?storage/.test(n)) return ['T5', 'T6'];
-  if (/power\s*electronic|converter|smps|rectifier|pfc|switch.?mode/.test(n)) return ['T1', 'T4'];
-  if (/machine|motor|drive|induction/.test(n)) return ['T2', 'T3'];
-  if (/control\s*system|signals?\s*(and|&)?\s*systems/.test(n)) return ['ALL'];
-  return [];
+  return rows.map(n => '[BOOK: ' + n.book + ']\nWHY THIS BOOK: ' + n.why + '\n' + n.notes).join('\n\n');
 }
 function shortBook_(name) {
   return String(name || '').replace(/\.pdf$/i, '').replace(/\(z-?lib[^)]*\)|\(Z-Library\)/gi, '').replace(/_/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60);
@@ -1662,7 +1650,7 @@ function quizStart_(ctx, a) {
   const plan = [];
   if (nInput) plan.push(' FIRST ' + nInput + ' question(s) — kind "inputs": about what THIS student actually typed in their saved ' + stage.code + ' entries. Name or quote the entry (e.g. "Your FR2 says ±1 %, which instrument will measure it and why?").');
   plan.push(' ' + (nInput ? 'NEXT ' : 'FIRST ') + nProj + ' question(s) — kind "project": about their project as a whole — their artefact, title and theme (why this topology/method, how a block works, what happens if a value changes, how they will test it).');
-  if (nBook) plan.push(' LAST ' + nBook + ' question(s) — kind "book": a fundamental behind their project taken from ONE of the textbooks in the REFERENCE NOTES (governing equation, principle, method, pitfall). Set "source" to that book\'s exact name as written after "BOOK:". Use different books where possible.');
+  if (nBook) plan.push(' LAST ' + nBook + ' question(s) — kind "book": a fundamental behind their project taken from ONE of the textbooks in the REFERENCE NOTES (governing equation, principle, method, pitfall). Set "source" to that book\'s exact name as written after "BOOK:" and "ref" to the chapter/section given in its notes (e.g. "Ch.6.3"). Use different books where possible.');
   const sys = [
     'You are the AI Mentor for the ' + DEPARTMENT.course + ', ' + DEPARTMENT.name + ', ' + DEPARTMENT.institution + '.',
     'Prepare a short oral-style quiz for ONE student about THEIR OWN MINI PROJECT (their theme, artefact and the work they saved for stage ' + stage.code + ' — ' + stage.title + ').',
@@ -1670,7 +1658,7 @@ function quizStart_(ctx, a) {
     plan.join('\n'),
     'Every question must still be relevant to THIS student\'s project. Each question must be answerable in about ' + cfg.seconds + ' seconds (one or two sentences) and be under 35 words. No answers or hints.',
     PLAIN_MATH_RULE,
-    'Return ONLY JSON: {"questions":[{"kind":"inputs|project|book","q":"question text","entry":"short label of what it is about","source":"exact book name for kind book, else empty"}]}',
+    'Return ONLY JSON: {"questions":[{"kind":"inputs|project|book","q":"question text","entry":"short label of what it is about","source":"exact book name for kind book, else empty","ref":"chapter for kind book, else empty"}]}',
     '',
     'THE STUDENT\'S PROJECT:',
     project,
@@ -1690,7 +1678,7 @@ function quizStart_(ctx, a) {
     const book = kind === 'book' || x.source ? matchBook_(x.source, books) : '';
     if (kind === 'book' && !book) kind = 'project';
     if (kind === 'inputs' && !work) kind = 'project';
-    return { q: plainMath_(clean_(x.q, 400)), entry: plainMath_(clean_(x.entry, 120)), kind: kind, source: book };
+    return { q: plainMath_(clean_(x.q, 400)), entry: plainMath_(clean_(x.entry, 120)), kind: kind, source: book, ref: book ? clean_(x.ref, 40) : '' };
   }).filter(x => x.q).slice(0, cfg.questions)
     .map((x, k) => Object.assign(x, { _k: k })).sort((x, y) => (ORDER[x.kind] - ORDER[y.kind]) || (x._k - y._k))
     .map(x => { delete x._k; return x; });
@@ -1707,9 +1695,21 @@ function quizStart_(ctx, a) {
   return Object.assign({ quizId: id, index: 0, total: qs.length, seconds: cfg.seconds, limit: cfg.seconds, log: log }, questionView_(qs[0], stage));
 }
 /** Where a quiz question comes from, in words the student understands. */
+/** "Book, Ch.x — why this book" from the AI's answer, checked against the real book list.
+ *  A book question always gets its own book as the reference. */
+function referenceOf_(r, q, themeId) {
+  r = r && typeof r === 'object' ? r : {};
+  const books = notesRows_(themeId);
+  const title = matchBook_(r.book, books.map(b => b.book)) || (q && q.source) || '';
+  if (!title) return '';
+  const b = books.filter(x => x.book === title)[0] || {};
+  const chapter = clean_(r.chapter, 40) || (q && q.source === title ? q.ref : '') || '';
+  const why = plainMath_(clean_(r.why, 200)) || b.why || '';
+  return title + (chapter ? ', ' + chapter : '') + (why ? ' — why this book: ' + why : '');
+}
 function sourceLabel_(x, stage) {
   if (!x) return '';
-  if (x.kind === 'book' && x.source) return 'Textbook: ' + x.source;
+  if (x.kind === 'book' && x.source) return 'Textbook: ' + x.source + (x.ref ? ', ' + x.ref : '');
   if (x.kind === 'inputs') return 'Your saved ' + ((stage && stage.code) || '') + ' entries';
   return 'Your project';
 }
@@ -1748,9 +1748,9 @@ function quizAnswer_(ctx, a) {
     '- If 2: confirm briefly why the answer is right (1–2 sentences).',
     '- If 0 or 1: say what was wrong or missing, starting with "You answered … but …" (or "You did not answer in time." if blank), then explain THE CORRECT WAY TO ANSWER — the right reasoning, equation, unit or measurement method — in 2–4 sentences.',
     'Keep feedback under 90 words. Judge using the student\'s saved work, the handbook, and the textbook reference notes below; do not invent requirements and do not copy long passages.',
-    'If the question names a SOURCE TEXTBOOK, judge mainly from that book\'s notes and mention the book by name in "correct_way" (e.g. "As explained in <book>, …").',
+    'If the question names a SOURCE TEXTBOOK, judge mainly from that book\'s notes. Whenever you use a textbook, name it in "correct_way" (e.g. "As Hart, Power Electronics, Ch.6.3 explains, …") and fill "reference" with the book (exact name after "BOOK:"), the chapter, and one short reason why that book is the right reference (from its WHY THIS BOOK line). Leave "reference" empty only if no textbook was needed.',
     PLAIN_MATH_RULE,
-    'Return ONLY JSON: {"mark":0,"verdict":"correct|partly correct|incorrect","feedback":"what was right/wrong in their answer","correct_way":"the correct way to answer (empty if mark is 2)"}',
+    'Return ONLY JSON: {"mark":0,"verdict":"correct|partly correct|incorrect","feedback":"what was right/wrong in their answer","correct_way":"the correct way to answer (empty if mark is 2)","reference":{"book":"exact book name or empty","chapter":"e.g. Ch.6.3","why":"why this book is the right reference"}}',
     '',
     'HANDBOOK REQUIREMENTS FOR THIS STAGE:',
     handbookStageText_(stage, theme),
@@ -1759,7 +1759,7 @@ function quizAnswer_(ctx, a) {
     stageRecordsText_(team, stage, ctx),
     notes ? '\nTEXTBOOK REFERENCE NOTES:\n' + notes : ''
   ].filter(x => x !== '').join('\n');
-  const userMsg = 'QUESTION: ' + qs[i].q + (qs[i].entry ? '\n(About: ' + qs[i].entry + ')' : '') + (qs[i].source ? '\nSOURCE TEXTBOOK: ' + qs[i].source : '\nSOURCE: ' + sourceLabel_(qs[i], stage)) + '\nSTUDENT ANSWER: ' + (pend.answer || '(no answer — time ran out)');
+  const userMsg = 'QUESTION: ' + qs[i].q + (qs[i].entry ? '\n(About: ' + qs[i].entry + ')' : '') + (qs[i].source ? '\nSOURCE TEXTBOOK: ' + qs[i].source + (qs[i].ref ? ' (' + qs[i].ref + ')' : '') : '\nSOURCE: ' + sourceLabel_(qs[i], stage)) + '\nSTUDENT ANSWER: ' + (pend.answer || '(no answer — time ran out)');
   const res = parseJson_(callGemini_(m.key, m.model, sys, [{ role: 'user', parts: [{ text: userMsg }] }], 0.3, 8192, true));
   let mark = Math.round(Number(res.mark));
   if (isNaN(mark)) mark = 0;
@@ -1767,13 +1767,14 @@ function quizAnswer_(ctx, a) {
   if (!pend.answer) mark = 0;
   const verdict = mark === 2 ? 'correct' : mark === 1 ? 'partly correct' : 'incorrect';
   const feedback = plainMath_(clean_(res.feedback, 1200)), correct = mark === 2 ? '' : plainMath_(clean_(res.correct_way, 1200));
+  const reference = referenceOf_(res.reference, qs[i], team.themeId);
   const srcLabel = sourceLabel_(qs[i], stage);
   results.push({ q: qs[i].q, entry: qs[i].entry, source: qs[i].source || '', sourceLabel: srcLabel, answer: pend.answer, seconds: pend.seconds, late: pend.late, mark: mark, verdict: verdict, feedback: feedback, correct: correct });
   const icon = mark === 2 ? '✅' : mark === 1 ? '🟡' : '❌';
-  log.push(logMentor_(ctx, team.id, q.stageId, 'model', icon + ' **' + mark + '/2 — ' + verdict + '**' + (pend.late ? ' *(time up)*' : ' *(answered in ' + pend.seconds + ' s)*') + '\n' + feedback + (correct ? '\n\n**The correct way to answer:** ' + correct : '') + '\n\n*Question source: ' + srcLabel + '*', m.model, '', 1));
+  log.push(logMentor_(ctx, team.id, q.stageId, 'model', icon + ' **' + mark + '/2 — ' + verdict + '**' + (pend.late ? ' *(time up)*' : ' *(answered in ' + pend.seconds + ' s)*') + '\n' + feedback + (correct ? '\n\n**The correct way to answer:** ' + correct : '') + (reference ? '\n\n📘 **Reference:** ' + reference : '') + '\n\n*Question source: ' + srcLabel + '*', m.model, '', 1));
   const done = i + 1 >= qs.length;
   const upd = { resultsJson: JSON.stringify(results), current: i + 1, askedAt: '', pendingJson: '' };
-  const out = { index: i, mark: mark, verdict: verdict, feedback: feedback, correct: correct, source: qs[i].source || '', sourceLabel: srcLabel, late: pend.late, seconds: pend.seconds, done: done, total: qs.length, log: log };
+  const out = { index: i, mark: mark, verdict: verdict, feedback: feedback, correct: correct, reference: reference, source: qs[i].source || '', sourceLabel: srcLabel, late: pend.late, seconds: pend.seconds, done: done, total: qs.length, log: log };
   if (done) {
     const sum = results.reduce((n, r) => n + r.mark, 0);
     const score = Math.round((sum / (2 * results.length)) * 10 * 2) / 2;   // out of 10
@@ -1919,141 +1920,3 @@ function deleteAnnouncement_(ctx, a) {
   return announcementsFor_(ctx);
 }
 
-/* ============================================================================
- * AI QUESTION BANK — built once per book from the "Mini Project Books" Drive
- * folder. Gemini reads the PDF (via the Gemini Files API) and writes questions
- * with model answers. Quizzes then pick from this bank instantly.
- * ========================================================================== */
-const BOOK_MAX_BYTES = 48 * 1024 * 1024;   // Apps Script UrlFetch payload limit is 50 MB
-
-function booksFolder_() {
-  const id = settings_().booksFolderId;
-  if (!id) throw new Error('Set the books folder link first.');
-  try { return DriveApp.getFolderById(id); }
-  catch (e) { throw new Error('Cannot open the books folder. Make sure the account that owns this portfolio can open the folder link.'); }
-}
-function booksList_(ctx) {
-  const folder = booksFolder_();
-  const counts = {};
-  all_('StudyNotes').forEach(q => { counts[q.fileId] = (counts[q.fileId] || 0) + 1; });
-  const status = safeJson_(PROP.getProperty('QB_STATUS'), {});
-  const books = [];
-  const it = folder.getFiles();
-  while (it.hasNext()) {
-    const f = it.next();
-    if (f.getMimeType() !== 'application/pdf' && !/\.pdf$/i.test(f.getName())) continue;
-    const size = f.getSize();
-    const noteRow = all_('StudyNotes').filter(n => n.fileId === f.getId())[0];
-    books.push({ id: f.getId(), name: f.getName(), short: shortBook_(f.getName()), sizeMB: Math.round(size / 1048576 * 10) / 10, tooBig: size > BOOK_MAX_BYTES,
-                 count: counts[f.getId()] || 0, themes: noteRow ? noteRow.themes : '', suggest: autoThemes_(f.getName()).join(','),
-                 lastRun: (status[f.getId()] || {}).at || '', error: (status[f.getId()] || {}).error || '' });
-  }
-  books.sort((x, y) => x.name.localeCompare(y.name));
-  return { folderId: settings_().booksFolderId, folderName: folder.getName(), folderUrl: folder.getUrl(), books: books,
-           total: all_('StudyNotes').length, quizSeconds: quizCfg_().seconds, quizQuestions: quizCfg_().questions };
-}
-function adminGeminiKey_() {
-  const rk = resolveTeamKey_({ apiKeyId: '', model: '' });
-  if (!rk) throw new Error('Set the department Gemini key first (Script property GEMINI_API_KEY or Administration → Gemini AI).');
-  const meta = keysMeta_().filter(k => k.id === rk.id)[0];
-  return { key: rk.key, model: (meta && meta.model) || settings_().defaultModel };
-}
-/** Uploads a Drive PDF to the Gemini Files API (cached ~46 h) and returns its file URI. */
-function geminiFileUri_(key, file) {
-  const cacheKey = 'QB_FILE_' + file.getId() + '_' + String(key).slice(-6);   // an upload only works with the key that made it
-  const cached = safeJson_(PROP.getProperty(cacheKey), null);
-  if (cached && cached.uri && cached.exp > Date.now()) return cached.uri;
-  const blob = file.getBlob();
-  const bytes = blob.getBytes();
-  if (bytes.length > BOOK_MAX_BYTES) throw new Error('"' + file.getName() + '" is ' + Math.round(bytes.length / 1048576) + ' MB — too big to send (limit 48 MB). Split it into chapter PDFs in the same folder.');
-  const start = UrlFetchApp.fetch('https://generativelanguage.googleapis.com/upload/v1beta/files', {
-    method: 'post', contentType: 'application/json', muteHttpExceptions: true,
-    headers: { 'x-goog-api-key': key, 'X-Goog-Upload-Protocol': 'resumable', 'X-Goog-Upload-Command': 'start',
-               'X-Goog-Upload-Header-Content-Length': String(bytes.length), 'X-Goog-Upload-Header-Content-Type': 'application/pdf' },
-    payload: JSON.stringify({ file: { display_name: shortBook_(file.getName()) } })
-  });
-  const hdr = start.getAllHeaders ? start.getAllHeaders() : start.getHeaders();
-  const upUrl = hdr['x-goog-upload-url'] || hdr['X-Goog-Upload-URL'] || hdr['X-Goog-Upload-Url'];
-  if (!upUrl) throw new Error('Gemini did not accept the upload (' + start.getResponseCode() + '): ' + start.getContentText().slice(0, 200));
-  const up = UrlFetchApp.fetch(upUrl, { method: 'post', contentType: 'application/pdf', muteHttpExceptions: true,
-    headers: { 'X-Goog-Upload-Offset': '0', 'X-Goog-Upload-Command': 'upload, finalize' }, payload: bytes });
-  const info = safeJson_(up.getContentText(), {});
-  if (!info.file || !info.file.uri) throw new Error('Upload to Gemini failed (' + up.getResponseCode() + '): ' + up.getContentText().slice(0, 200));
-  let state = info.file.state, tries = 0;
-  while (state === 'PROCESSING' && tries++ < 25) {
-    Utilities.sleep(3000);
-    const g = UrlFetchApp.fetch('https://generativelanguage.googleapis.com/v1beta/' + info.file.name, { headers: { 'x-goog-api-key': key }, muteHttpExceptions: true });
-    state = (safeJson_(g.getContentText(), {}) || {}).state;
-  }
-  if (state && state !== 'ACTIVE') throw new Error('Gemini could not read "' + file.getName() + '" (state ' + state + '). Try again in a minute.');
-  PROP.setProperty(cacheKey, JSON.stringify({ uri: info.file.uri, exp: Date.now() + 46 * 3600 * 1000 }));
-  return info.file.uri;
-}
-function buildNotes_(ctx, a) {
-  const folder = booksFolder_();
-  const file = DriveApp.getFileById(a.fileId);
-  let inFolder = false; const ps = file.getParents(); while (ps.hasNext()) { if (ps.next().getId() === folder.getId()) inFolder = true; }
-  if (!inFolder) throw new Error('That file is not in the books folder.');
-  const status = safeJson_(PROP.getProperty('QB_STATUS'), {});
-  const forced = (Array.isArray(a.themes) && a.themes.length ? a.themes : autoThemes_(file.getName()))
-    .map(v => String(v || '').toUpperCase().trim()).filter(v => v === 'ALL' || /^T[1-6]$/.test(v));
-  try {
-    const k = adminGeminiKey_();
-    const uri = geminiFileUri_(k.key, file);
-    const themeList = THEMES.map(t => t.id + ' = ' + t.name).join('; ');
-    const focus = forced.length && forced.indexOf('ALL') < 0
-      ? 'This book is for these mini-project themes: ' + forced.map(id => (themeById_(id) || {}).name || id).join(', ') + '. Focus the notes on what those projects need.'
-      : 'Cover concepts useful for these mini-project themes: ' + themeList + '.';
-    const prompt = [
-      'You are preparing concise STUDY NOTES from the attached textbook "' + shortBook_(file.getName()) + '" for 5th-semester B.E. EEE students doing mini projects.',
-      focus,
-      'Summarise the key engineering concepts, governing equations (with symbols/units), methods and common pitfalls the book teaches. Tight bullet notes, grouped by topic, 250–500 words. Cover only what the book actually teaches.',
-      forced.length ? '' : 'Also list which theme ids (T1..T6, or ALL) these notes are most relevant to.',
-      'Return ONLY JSON: {"themes":["T5","T6"],"notes":"- bullet\\n- bullet ..."}'
-    ].filter(Boolean).join('\n');
-    const ask = u => callGemini_(k.key, k.model, 'You write accurate, concise engineering study notes strictly from the attached book.',
-      [{ role: 'user', parts: [{ file_data: { mime_type: 'application/pdf', file_uri: u } }, { text: prompt }] }], 0.4, 16384, true);
-    let raw;
-    try { raw = ask(uri); }
-    catch (e) {
-      if (!/^FILE_GONE:/.test(String(e.message))) throw e;
-      // Gemini deleted / cannot see the earlier upload: upload the book again and retry once.
-      PROP.deleteProperty('QB_FILE_' + file.getId() + '_' + String(k.key).slice(-6));
-      try { raw = ask(geminiFileUri_(k.key, file)); }
-      catch (e2) { throw new Error(/^FILE_GONE:/.test(String(e2.message)) ? 'Gemini could not open the uploaded book. Please try again in a minute.' : e2.message); }
-    }
-    const out = parseJson_(raw);
-    const notes = clean_(out.notes, 8000);
-    if (!notes) throw new Error('Gemini returned no notes. Please try again.');
-    const gTh = (Array.isArray(out.themes) ? out.themes : [out.themes]).map(v => String(v || '').toUpperCase().trim()).filter(v => v === 'ALL' || /^T[1-6]$/.test(v));
-    const th = forced.length ? forced : gTh;   // HoD's choice / file-name match beats the AI's guess
-    const t = now_();
-    // replace any previous notes for this book
-    all_('StudyNotes').filter(n => n.fileId === file.getId()).sort((x, y) => y._row - x._row).forEach(n => remove_('StudyNotes', n._row));
-    insert_('StudyNotes', { id: uid_('sn'), book: file.getName(), fileId: file.getId(), themes: (th.length ? th : ['ALL']).join(','), notes: notes, createdAt: t });
-    status[file.getId()] = { at: t, error: '' };
-    PROP.setProperty('QB_STATUS', JSON.stringify(status));
-    audit_(ctx, 'buildNotes', '', shortBook_(file.getName()));
-    return { ok: true, book: shortBook_(file.getName()), words: notes.split(/\s+/).length, themes: (th.length ? th : ['ALL']).join(',') };
-  } catch (e) {
-    status[file.getId()] = { at: now_(), error: String(e.message || e).slice(0, 300) };
-    PROP.setProperty('QB_STATUS', JSON.stringify(status));
-    throw e;
-  }
-}
-function notesList_(ctx, a) {
-  return all_('StudyNotes').map(n => ({ id: n.id, book: shortBook_(n.book), themes: n.themes, notes: n.notes, createdAt: n.createdAt }));
-}
-function deleteNote_(ctx, a) {
-  const n = one_('StudyNotes', 'id', a.id);
-  if (!n) throw new Error('Notes not found.');
-  remove_('StudyNotes', n._row);
-  audit_(ctx, 'deleteNote', '', shortBook_(n.book));
-  return true;
-}
-function clearNotes_(ctx, a) {
-  const rows = all_('StudyNotes').sort((x, y) => y._row - x._row);
-  rows.forEach(n => remove_('StudyNotes', n._row));
-  audit_(ctx, 'clearNotes', '', String(rows.length));
-  return rows.length;
-}

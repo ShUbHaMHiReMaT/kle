@@ -9,6 +9,7 @@ A Google Apps Script web app for the Department of Electrical & Electronics Engi
 | `Code.gs` | Server: initialisation, data layer, role checks, records, sign-off locks, evidence, reviews, Gemini, admin |
 | `Handbook.gs` | Fixed department name and the full handbook-derived structure (themes, stages, rubric, reviews, lenses) |
 | `Seed.gs` | 2026–27 class list (17 teams, 54 students by SRN, 11 guides, titles) and its import function |
+| `Books.gs` | Built-in study notes from the 12 department textbooks/battery references (chapter pointers + why each book), used by the AI Mentor quiz and answers — no PDF reading at runtime |
 | `Index.html` | Page shell and design system (responsive layout, light/dark themes) |
 | `App.html` | Client application, included into `Index.html` |
 | `appsscript.json` | Manifest: OAuth scopes, V8 runtime, web-app settings |

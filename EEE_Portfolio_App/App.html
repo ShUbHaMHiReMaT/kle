@@ -393,8 +393,9 @@
   let contentEl, titleEl, navEl, appEl;
   function navItems() {
     const r = S.boot.user.role;
-    if (r === 'admin' || r === 'coordinator') return [['h', 'Department'], ['home', 'chart', 'Dashboard'], ['teams', 'folder', 'Team Portfolios'], ['h', 'Manage'], ['admin', 'settings', 'Administration'], ['h', 'Reference'], ['handbook', 'book', 'Handbook']];
-    if (r === 'faculty') return [['h', 'Guide'], ['home', 'chart', 'My Teams'], ['h', 'Reference'], ['handbook', 'book', 'Handbook']];
+    const share = S.boot.staffFolderUrl ? [['staffdrive', 'users', 'Staff shared folder']] : [];
+    if (r === 'admin' || r === 'coordinator') return [['h', 'Department'], ['home', 'chart', 'Dashboard'], ['teams', 'folder', 'Team Portfolios'], ['h', 'Manage'], ['admin', 'settings', 'Administration'], ['h', 'Reference'], ['handbook', 'book', 'Handbook']].concat(share);
+    if (r === 'faculty') return [['h', 'Guide'], ['home', 'chart', 'My Teams'], ['h', 'Reference'], ['handbook', 'book', 'Handbook']].concat(share);
     return [['h', 'My Project'], ['team', 'folder', 'My Portfolio'], ['mentor', 'bot', 'AI Mentor'], ['reviews', 'star', 'Reviews & Feedback'], ['h', 'Reference'], ['handbook', 'book', 'Handbook']];
   }
   function renderShell() {
@@ -447,6 +448,7 @@
       if (it[0] === 'h') { navEl.appendChild(el('div', { class: 'nav-h' }, it[1])); return; }
       const r = S.boot.user.role;
       const active = (r === 'student' && S.view === 'team') ? (it[0] === (S.tab === 'mentor' || S.tab === 'reviews' ? S.tab : 'team')) : S.view === it[0] || (it[0] === 'teams' && S.view === 'team' && isStaff()) || (it[0] === 'home' && S.view === 'team' && S.boot.user.role === 'faculty');
+      if (it[0] === 'staffdrive') { navEl.appendChild(el('a', { class: 'nav-link', href: S.boot.staffFolderUrl, target: '_blank', rel: 'noopener noreferrer', title: 'Google Drive folder shared by all staff — not visible to students', style: { display: 'flex', alignItems: 'center', gap: '10px', textDecoration: 'none', color: 'inherit', padding: '9px 12px', borderRadius: '8px' } }, icon(it[1]), it[2], el('span', { class: 'tiny', style: { marginLeft: 'auto', opacity: .7 } }, '↗'))); return; }
       navEl.appendChild(el('button', { class: active ? 'active' : '', onclick: () => go(it[0]) }, icon(it[1]), it[2]));
     });
   }
@@ -494,6 +496,8 @@
       const avg = teams.length ? teams.reduce((a, t) => a + overall(t), 0) / teams.length : 0;
       c.appendChild(el('div', { class: 'grid g4', style: { margin: '18px 0' } },
         [['Project teams', teams.length, 'folder', ''], ['Students', students, 'users', ''], ['Cleared Review 3 (hard gate)', r3 + ' / ' + teams.length, 'shield', 'ok'], ['Average progress', Math.round(avg) + '%', 'chart', 'red']].map(x => el('div', { class: 'card stat lift ' + x[3] }, el('div', { class: 'si' }, icon(x[2])), el('div', null, el('div', { class: 'v' }, x[1]), el('div', { class: 'l' }, x[0]))))));
+      if (S.boot.staffFolderUrl) c.appendChild(el('div', { class: 'alert', style: { marginBottom: '16px' } }, icon('folder'), el('div', { style: { flex: 1 } }, el('b', null, 'Staff shared folder: '), 'one Google Drive folder for all faculty, coordinators, reviewers and the HoD to share files. Students cannot see it.'),
+        el('a', { class: 'btn sm primary', href: S.boot.staffFolderUrl, target: '_blank', rel: 'noopener noreferrer' }, icon('link'), 'Open folder')));
       if (flagged) c.appendChild(el('div', { class: 'alert warn', style: { marginBottom: '16px' } }, icon('alert'), el('div', null, el('b', null, flagged + ' team(s) have integrity flags'), ' — e.g. predictions signed after first power-on, or S4 started before S3 (Handbook 7.5 / 7.7).')));
     }
     const q = el('input', { type: 'text', placeholder: 'Search team, member, guide, artefact…', style: { maxWidth: '320px' } });
@@ -1194,6 +1198,7 @@
         el('div', { class: 'row' }, el('span', { class: 'badge ' + cls }, (r.mark === 2 ? '✅ ' : r.mark === 1 ? '🟡 ' : '❌ ') + r.mark + '/2 — ' + r.verdict), el('span', { class: 'tiny muted' }, r.late ? 'Time ran out' : 'Answered in ' + r.seconds + ' s')),
         r.feedback ? el('div', { class: 'selectable' }, plainMath(r.feedback)) : null,
         r.correct ? el('div', { class: 'alert ok', style: { display: 'block' } }, el('b', null, 'The correct way to answer: '), plainMath(r.correct)) : null,
+        r.reference ? el('div', { class: 'info-box small', style: { borderLeft: '3px solid var(--brand)' } }, '📘 ', el('b', null, 'Reference: '), plainMath(r.reference)) : null,
         r.sourceLabel ? el('div', { class: 'tiny muted' }, 'Question source: ' + r.sourceLabel) : null,
         el('div', null, el('button', { class: 'btn sm', onclick: () => askAbout(r) }, icon('msg'), 'Ask about this answer')));
       if (r.done) {
@@ -1299,15 +1304,15 @@
     drawAdmin();
   }
   function drawAdmin() {
-    const tabs = [['faculty', 'Faculty'], ['students', 'Students'], ['teams', 'Teams'], ['announce', 'Announcements'], ['questions', 'AI Questions'], ['gemini', 'Gemini AI'], ['settings', 'Settings'], ['audit', 'Audit log']]
-      .filter(t => S.boot.user.role === 'admin' || (t[0] !== 'gemini' && t[0] !== 'settings' && t[0] !== 'questions'));
+    const tabs = [['faculty', 'Faculty'], ['students', 'Students'], ['teams', 'Teams'], ['announce', 'Announcements'], ['gemini', 'Gemini AI'], ['settings', 'Settings'], ['audit', 'Audit log']]
+      .filter(t => S.boot.user.role === 'admin' || (t[0] !== 'gemini' && t[0] !== 'settings'));
     if (!tabs.some(t => t[0] === S.adminTab)) S.adminTab = 'faculty';
     const c = clear(contentEl);
     c.appendChild(el('div', { class: 'row between', style: { marginBottom: '12px' } }, el('div', null, el('h1', null, 'Administration'), el('div', { class: 'small muted' }, S.boot.dept.name + ' · all changes are saved to the backend automatically — no manual sheet edits needed.')),
       el('button', { class: 'btn primary', onclick: () => reminderModal() }, icon('send'), 'Send reminder')));
     c.appendChild(el('div', { class: 'tabs' }, tabs.map(t => el('button', { class: S.adminTab === t[0] ? 'active' : '', onclick: () => { S.adminTab = t[0]; drawAdmin(); } }, t[1]))));
     const pane = el('div'); c.appendChild(pane);
-    ({ faculty: admFaculty, students: admStudents, teams: admTeams, announce: admAnnounce, questions: admQuestions, gemini: admGemini, settings: admSettings, audit: admAudit })[S.adminTab](pane);
+    ({ faculty: admFaculty, students: admStudents, teams: admTeams, announce: admAnnounce, gemini: admGemini, settings: admSettings, audit: admAudit })[S.adminTab](pane);
   }
   const A = () => S.admin;
   const facName = id => (A().faculty.filter(f => f.id === id)[0] || {}).name || '';
@@ -1524,7 +1529,7 @@
         try { if (k.id) await call('updateKey', { id: k.id, label: label.value, model: model.value, key: key.value }); else await call('addKey', { label: label.value, key: key.value, model: model.value });
           key.value = ''; S.admin = await call('adminData'); c(); drawAdmin(); toast('Key saved.', 'ok'); } catch (e) { toast(e.message, 'bad'); } } }] });
   }
-  async function reloadBoot() { const b = await call('bootstrap'); S.boot.stages = b.stages; S.boot.settings = b.settings; }
+  async function reloadBoot() { const b = await call('bootstrap'); S.boot.stages = b.stages; S.boot.settings = b.settings; S.boot.staffFolderUrl = b.staffFolderUrl; renderNav(); }
   /* ----- Settings ----- */
   function admAnnounce(pane) {
     const title = el('input', { type: 'text', placeholder: 'e.g. Review 2 moved to Friday' });
@@ -1555,66 +1560,19 @@
     drawList();
   }
 
-  function admQuestions(pane) {
-    const info = el('div', { class: 'card', style: { marginBottom: '16px' } });
-    const bankWrap = el('div');
-    const load = async () => {
-      clear(info).appendChild(el('div', { class: 'card-b' }, loader('Reading the books folder…')));
-      try {
-        const d = await call('booksList');
-        const books = el('div', { class: 'stack' }, d.books.map(bk => {
-          const btn = el('button', { class: 'btn primary sm', disabled: bk.tooBig }, icon('bot'), bk.count ? 'Rebuild notes' : 'Build study notes');
-          // which project themes this book is for (pre-ticked from saved tags or the file name, e.g. battery books -> T5, T6)
-          const pre = String(bk.themes || bk.suggest || '').split(',').map(x => x.trim()).filter(Boolean);
-          const boxes = ['T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'ALL'].map(id => {
-            const th = theme(id);
-            const cb = el('input', { type: 'checkbox', checked: pre.indexOf(id) >= 0 });
-            return { id, cb, node: el('label', { class: 'tiny', title: th ? th.name : 'General (all themes)', style: { display: 'inline-flex', alignItems: 'center', gap: '3px', marginRight: '8px', cursor: 'pointer' } }, cb, id === 'ALL' ? 'All' : id + ' ' + (th ? th.short : '')) };
-          });
-          btn.onclick = async () => {
-            const picked = boxes.filter(b => b.cb.checked).map(b => b.id);
-            busy(btn, true, 'Reading the book & writing notes… (up to a minute)');
-            try { const r = await call('buildNotes', { fileId: bk.id, themes: picked }); toast('Study notes built from ' + r.book + ' (' + r.words + ' words, themes ' + r.themes + ').', 'ok'); load(); drawBank(); }
-            catch (e) { toast(e.message, 'bad'); busy(btn, false); }
-          };
-          return el('div', { style: { padding: '10px 0', borderBottom: '1px solid var(--line)' } },
-            el('div', { class: 'row between' },
-              el('div', { style: { minWidth: 0 } }, el('b', null, bk.short), el('div', { class: 'tiny muted' }, bk.sizeMB + ' MB · ' + (bk.count ? 'notes ready (' + (bk.themes || 'ALL') + ')' : 'no notes yet') + (bk.error ? ' · last error: ' + bk.error : bk.lastRun ? ' · built ' + fmt(bk.lastRun) : '')), bk.tooBig ? el('div', { class: 'tiny', style: { color: 'var(--bad)' } }, 'Too big to send — split into chapter PDFs') : null),
-              el('div', { class: 'row', style: { flexWrap: 'nowrap' } }, btn)),
-            el('div', { style: { marginTop: '6px' } }, el('span', { class: 'tiny muted', style: { marginRight: '6px' } }, 'Used for:'), boxes.map(b => b.node)));
-        }));
-        clear(info).appendChild(el('div', null, el('div', { class: 'card-h' }, icon('book'), el('h3', { style: { flex: 1 } }, 'Core textbooks → study notes'), el('a', { class: 'small', href: d.folderUrl, target: '_blank', rel: 'noopener noreferrer' }, 'Open folder'), el('button', { class: 'btn ghost sm', onclick: load }, icon('refresh'))),
-          el('div', { class: 'card-b' }, el('p', { class: 'small muted' }, 'The quiz always asks each student about their OWN project. The AI reads each textbook once into short engineering notes and uses them (with the handbook) for deeper fundamentals and marking. Tick which themes each book is for: a team only gets notes from books ticked for its theme — e.g. battery books ticked T5 + T6 are used for the Battery Protection and Battery Management teams only. Books whose name mentions battery / BMS / cell are pre-ticked T5 + T6. Quizzes still work with no notes built.'),
-            books.children.length ? books : el('p', { class: 'muted' }, 'No PDF books found in the folder.'))));
-      } catch (e) { clear(info).appendChild(el('div', { class: 'card-b' }, el('div', { class: 'alert bad' }, icon('alert'), e.message))); }
-    };
-    const drawBank = async () => {
-      clear(bankWrap).appendChild(loader('Loading study notes…'));
-      try {
-        const rows = await call('notesList', {});
-        clear(bankWrap).appendChild(tableCard('Study notes (' + rows.length + ')', rows.length ? el('button', { class: 'btn danger sm', onclick: async () => { if (!(await confirmBox('Clear all notes', 'Delete ALL study notes? Quizzes will fall back to the handbook until you rebuild them.', 'Delete all', true))) return; try { await call('clearNotes', {}); load(); drawBank(); } catch (e) { toast(e.message, 'bad'); } } }, icon('trash'), 'Clear all') : null,
-          ['Book', 'Themes', 'Notes', ''],
-          rows.map(q => el('tr', null,
-            el('td', { class: 'small' }, q.book), el('td', null, el('span', { class: 'badge' }, q.themes)),
-            el('td', { class: 'small muted', style: { maxWidth: '520px', whiteSpace: 'pre-wrap' } }, (q.notes || '').slice(0, 400) + ((q.notes || '').length > 400 ? '…' : '')),
-            el('td', null, el('button', { class: 'btn ghost sm', title: 'Delete', onclick: async () => { try { await call('deleteNote', { id: q.id }); drawBank(); load(); } catch (e) { toast(e.message, 'bad'); } } }, icon('trash'))))),
-          'No study notes yet (optional). Quizzes still work from each student’s project and the handbook.'));
-      } catch (e) { clear(bankWrap).appendChild(el('div', { class: 'alert bad' }, e.message)); }
-    };
-    pane.appendChild(info); pane.appendChild(bankWrap); load(); drawBank();
-  }
-
   function admSettings(pane) {
     const st = A().settings;
-    const i = { gates: el('input', { type: 'checkbox', checked: st.enforceGates }), marks: el('input', { type: 'checkbox', checked: st.showMarksToStudents }), otp: el('input', { type: 'checkbox', checked: st.allowOtpLogin }), qs: el('input', { type: 'number', min: 15, max: 300, value: st.quizSeconds || 45, style: { width: '80px' } }), qn: el('input', { type: 'number', min: 3, max: 10, value: st.quizQuestions || 5, style: { width: '80px' } }) };
+    const i = { gates: el('input', { type: 'checkbox', checked: st.enforceGates }), marks: el('input', { type: 'checkbox', checked: st.showMarksToStudents }), otp: el('input', { type: 'checkbox', checked: st.allowOtpLogin }), qs: el('input', { type: 'number', min: 15, max: 300, value: st.quizSeconds || 45, style: { width: '80px' } }), qn: el('input', { type: 'number', min: 3, max: 10, value: st.quizQuestions || 5, style: { width: '80px' } }), sf: el('input', { type: 'url', value: st.staffFolderUrl || '', placeholder: 'https://drive.google.com/drive/folders/…' }) };
+    i.sf.dataset.allowpaste = '1';
     const save = el('button', { class: 'btn primary' }, icon('check'), 'Save settings');
-    save.onclick = async () => { busy(save, true, 'Saving…'); try { A().settings = await call('saveSettings', { enforceGates: i.gates.checked, showMarksToStudents: i.marks.checked, allowOtpLogin: i.otp.checked, quizSeconds: i.qs.value, quizQuestions: i.qn.value }); await reloadBoot(); toast('Saved.', 'ok'); } catch (e) { toast(e.message, 'bad'); } busy(save, false); };
+    save.onclick = async () => { busy(save, true, 'Saving…'); try { A().settings = await call('saveSettings', { enforceGates: i.gates.checked, showMarksToStudents: i.marks.checked, allowOtpLogin: i.otp.checked, quizSeconds: i.qs.value, quizQuestions: i.qn.value, staffFolderUrl: i.sf.value.trim() }); await reloadBoot(); toast('Saved.', 'ok'); } catch (e) { toast(e.message, 'bad'); } busy(save, false); };
     pane.appendChild(el('div', { class: 'grid g2' },
       el('div', { class: 'card' }, el('div', { class: 'card-h' }, el('h3', null, 'Portfolio rules')), el('div', { class: 'card-b' },
         el('label', { class: 'check' }, i.gates, el('span', null, el('b', null, 'Enforce review hard gates'), el('div', { class: 'small muted' }, 'Handbook 7.2: S6 and S7 stay locked for students until Review 3 is cleared.'))),
         el('label', { class: 'check' }, i.marks, el('span', null, el('b', null, 'Show marks to students'), el('div', { class: 'small muted' }, 'Decisions and feedback are always visible; marks only when enabled.'))),
         el('label', { class: 'check' }, i.otp, el('span', null, el('b', null, 'Allow email-code sign-in'), el('div', { class: 'small muted' }, 'Fallback for users whose Google identity is not shared with the app (e.g. personal Gmail).'))),
         el('div', { style: { marginTop: '8px', paddingTop: '8px', borderTop: '1px solid var(--line)' } }, el('h4', null, 'AI quiz'), el('div', { class: 'grid g2', style: { marginTop: '6px' } }, field('Seconds per question', i.qs, 'How long each student gets to answer (15–300).'), field('Questions per quiz', i.qn, 'How many questions each quiz has (3–10).'))),
+        el('div', { style: { marginTop: '8px', paddingTop: '8px', borderTop: '1px solid var(--line)' } }, el('h4', null, 'Staff shared folder'), field('Google Drive folder link (staff only)', i.sf, 'Shown to all staff in the menu and on the dashboard; never sent to students. Also share the folder itself with the staff emails in Google Drive.')),
         el('div', { style: { marginTop: '12px' } }, save))),
       el('div', { class: 'card' }, el('div', { class: 'card-h' }, el('h3', null, 'Department & backend')), el('div', { class: 'card-b' },
         el('p', null, el('b', null, 'Department: '), S.boot.dept.name, el('span', { class: 'badge', style: { marginLeft: '6px' } }, 'fixed in code')),

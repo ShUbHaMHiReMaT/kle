@@ -27,13 +27,14 @@ WHAT YOU NEED
    (Make a NEW key. Never share it with anyone.)
 
 
-THE 7 FILES IN THE FOLDER
+THE 8 FILES IN THE FOLDER
 -------------------------
    File on PC          Name to type in Apps Script     Type
    -----------         ---------------------------     ------
    Code.gs             Code                            Script
    Handbook.gs         Handbook                        Script
    Seed.gs             Seed                            Script
+   Books.gs            Books                           Script
    Index.html          Index                           HTML
    App.html            App                             HTML
    Logo.html           Logo                            HTML
@@ -69,11 +70,12 @@ STEP 3 - Add the files (copy and paste)
     - Delete everything inside it.
     - Paste the contents of Code.gs.
 
- B) Handbook, Seed  (Script files)
+ B) Handbook, Seed, Books  (Script files)
     - Click the  +  next to "Files"  ->  "Script".
     - Type the name  Handbook   (do NOT type .gs) and press Enter.
     - Delete everything inside it and paste Handbook.gs.
-    - Do the same for  Seed  (paste Seed.gs).
+    - Do the same for  Seed  (paste Seed.gs)
+      and for  Books  (paste Books.gs - the textbook notes).
 
  C) Index, App, Logo  (HTML files)
     - Click  +  ->  "HTML".
@@ -89,7 +91,7 @@ STEP 3 - Add the files (copy and paste)
  E) Press  Ctrl + S  to save everything.
 
  CHECK: The file list must show exactly these files:
-        appsscript.json, Code.gs, Handbook.gs, Seed.gs,
+        appsscript.json, Code.gs, Handbook.gs, Seed.gs, Books.gs,
         Index.html, App.html, Logo.html
  The names must match exactly (capital letters too).
 
