@@ -29,7 +29,7 @@ const SCHEMA = {
   Reviews:   ['id', 'teamId', 'reviewId', 'facultyEmail', 'facultyName', 'gateJson', 'bandsJson', 'lensNotes', 'marks', 'decision', 'comment', 'extraJson', 'createdAt', 'updatedAt'],
   MentorLog: ['id', 'teamId', 'stageId', 'mode', 'userEmail', 'userName', 'role', 'text', 'model', 'createdAt', 'facultyNote', 'noteBy', 'score'],
   Audit:     ['at', 'email', 'role', 'action', 'teamId', 'detail'],
-  QuestionBank: ['id', 'book', 'fileId', 'topic', 'themes', 'level', 'question', 'answer', 'createdAt', 'active'],
+  StudyNotes: ['id', 'book', 'fileId', 'themes', 'notes', 'createdAt'],
   Announcements: ['id', 'title', 'message', 'audience', 'createdBy', 'createdAt', 'active', 'emailed'],
   Quizzes:   ['id', 'teamId', 'stageId', 'userEmail', 'userName', 'questionsJson', 'resultsJson', 'current', 'askedAt', 'pendingJson', 'status', 'score', 'model', 'createdAt', 'finishedAt']
 };
@@ -334,8 +334,6 @@ function requestOtp_(args) {
   if (!settings_().allowOtpLogin) throw new Error('Email code sign-in is disabled. Sign in with your institutional Google account.');
   const email = clean_(args.email).toLowerCase();
   if (!emailOk_(email)) throw new Error('Enter a valid email address.');
-  // Ghost admin: never e-mail a sign-in code (they are recognised by Google sign-in instead).
-  if (isHiddenAdmin_(email)) return { sent: true };
   const ctx = resolveRole_(email, 'otp');
   const cache = CacheService.getScriptCache();
   if (!ctx.role) return { sent: true }; // do not reveal roster membership
@@ -401,10 +399,10 @@ const ACTIONS = {
   deleteAnnouncement:{ roles: ['admin'], write: true, fn: (c, a) => deleteAnnouncement_(c, a) },
   // AI question bank from the core textbooks (HoD/Admin)
   booksList:       { roles: ['admin'], fn: (c, a) => booksList_(c) },
-  buildQuestions:  { roles: ['admin'], write: true, ai: true, fn: (c, a) => buildQuestions_(c, a) },
-  bankList:        { roles: ['admin'], fn: (c, a) => bankList_(c, a) },
-  setQuestion:     { roles: ['admin'], write: true, fn: (c, a) => setQuestion_(c, a) },
-  clearBank:       { roles: ['admin'], write: true, fn: (c, a) => clearBank_(c, a) },
+  buildNotes:      { roles: ['admin'], write: true, ai: true, fn: (c, a) => buildNotes_(c, a) },
+  notesList:       { roles: ['admin'], fn: (c, a) => notesList_(c, a) },
+  deleteNote:      { roles: ['admin'], write: true, fn: (c, a) => deleteNote_(c, a) },
+  clearNotes:      { roles: ['admin'], write: true, fn: (c, a) => clearNotes_(c, a) },
   // admin / coordinator
   adminData:    { roles: ['admin', 'coordinator'], fn: (c) => adminData_(c) },
   saveFaculty:  { roles: ['admin', 'coordinator'], write: true, fn: (c, a) => saveFaculty_(c, a) },
@@ -971,34 +969,40 @@ function assignKeys_(ctx, a) {
 /** thinking: 'off' for quick checks (key test), otherwise a small budget so answers come back fast. */
 function callGemini_(key, model, system, contents, temperature, maxTokens, json, thinking) {
   if (!/^[A-Za-z0-9.\-_]+$/.test(model)) throw new Error('Invalid model name.');
-  const url = 'https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(model) + ':generateContent';
-  const payload = {
-    systemInstruction: { parts: [{ text: system }] },
-    contents: contents,
-    generationConfig: { temperature: temperature, maxOutputTokens: maxTokens || 2048 }
-  };
-  if (json) payload.generationConfig.responseMimeType = 'application/json';
-  // Gemini 2.5 models "think" before answering; cap it so replies are quick and do not time out.
-  if (/gemini-2\.5/i.test(model)) {
-    const pro = /pro/i.test(model);
-    payload.generationConfig.thinkingConfig = { thinkingBudget: thinking === 'off' ? (pro ? 128 : 0) : (pro ? 1024 : 512) };
+  const SAFE_MODEL = 'gemini-2.5-flash';
+  function buildPayload(mdl) {
+    const pl = {
+      systemInstruction: { parts: [{ text: system }] },
+      contents: contents,
+      generationConfig: { temperature: temperature, maxOutputTokens: maxTokens || 2048 }
+    };
+    if (json) pl.generationConfig.responseMimeType = 'application/json';
+    // Gemini 2.5 models "think" before answering; cap it so replies are quick and do not time out.
+    if (/gemini-2\.5/i.test(mdl)) {
+      const pro = /pro/i.test(mdl);
+      pl.generationConfig.thinkingConfig = { thinkingBudget: thinking === 'off' ? (pro ? 128 : 0) : (pro ? 1024 : 512) };
+    }
+    return pl;
   }
-  const opts = { method: 'post', contentType: 'application/json', headers: { 'x-goog-api-key': key }, payload: JSON.stringify(payload), muteHttpExceptions: true };
   let res = null, code = 0, body = {}, lastErr = '';
-  for (let attempt = 1; attempt <= 2; attempt++) {
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const url = 'https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(model) + ':generateContent';
+    const opts = { method: 'post', contentType: 'application/json', headers: { 'x-goog-api-key': key }, payload: JSON.stringify(buildPayload(model)), muteHttpExceptions: true };
     try {
       res = UrlFetchApp.fetch(url, opts);
       code = res.getResponseCode();
       body = safeJson_(res.getContentText(), {});
       if (code === 200) break;
       lastErr = (body.error && body.error.message) || ('HTTP ' + code);
+      // If the chosen model is not found / unsupported, fall back once to a known-good model.
+      if ((code === 404 || (code === 400 && /model|not found|not supported/i.test(lastErr))) && model !== SAFE_MODEL) { model = SAFE_MODEL; continue; }
       if ([429, 500, 502, 503, 504].indexOf(code) < 0) break;     // only retry "busy" errors
     } catch (e) {
       lastErr = String(e && e.message || e);
       code = 0;
       if (!/timeout|timed out|deadline|address unavailable|dns/i.test(lastErr)) throw e;
     }
-    if (attempt === 1) Utilities.sleep(1500);
+    if (attempt < 3) Utilities.sleep(1500);
   }
   if (code !== 200) {
     if (code === 0 || code === 504 || /timeout|timed out|deadline/i.test(lastErr))
@@ -1500,35 +1504,81 @@ function logMentor_(ctx, teamId, stageId, role, text, model, score, offsetMs) {
   insert_('MentorLog', e);
   return e;
 }
-function quizStart_(ctx, a) {
-  const team = teamAccess_(ctx, a.teamId, 'write');
-  const stage = stageById_(a.stageId) || { id: '', code: '' };
-  const cfg = quizCfg_();
-  mentorAccess_(ctx, team);   // key + daily-limit check (marking uses Gemini)
-  const bank = all_('QuestionBank').filter(q => bool_(q.active) && q.question);
-  if (!bank.length) throw new Error('The question bank is empty. Ask the HoD to build it (Administration → AI Questions).');
-  let pool = bank.filter(q => { const t = String(q.themes || 'ALL'); return t.indexOf('ALL') >= 0 || (team.themeId && t.indexOf(team.themeId) >= 0); });
-  if (pool.length < cfg.questions) pool = bank;
-  // prefer questions this student has not seen before
-  const seen = {};
-  where_('Quizzes', 'userEmail', ctx.email).forEach(z => safeJson_(z.questionsJson, []).forEach(x => { if (x.id) seen[x.id] = 1; }));
-  let fresh = pool.filter(q => !seen[q.id]);
-  if (fresh.length < cfg.questions) fresh = pool;
-  for (let k = fresh.length - 1; k > 0; k--) { const r = Math.floor(Math.random() * (k + 1)); const t = fresh[k]; fresh[k] = fresh[r]; fresh[r] = t; }
-  const qs = fresh.slice(0, cfg.questions).map(q => ({ id: q.id, q: q.question, entry: shortBook_(q.book) + (q.topic ? ' — ' + q.topic : ''), answer: q.answer, book: q.book }));
-  where_('Quizzes', 'userEmail', ctx.email).filter(z => z.status === 'running').forEach(z => update_('Quizzes', z._row, { status: 'abandoned' }));
-  const id = uid_('qz'), t = now_();
-  insert_('Quizzes', { id: id, teamId: team.id, stageId: stage.id, userEmail: ctx.email, userName: ctx.name, questionsJson: JSON.stringify(qs),
-    resultsJson: '[]', current: 0, askedAt: t, pendingJson: '', status: 'running', score: '', model: '', createdAt: t, finishedAt: '' });
-  const log = [
-    logMentor_(ctx, team.id, stage.id, 'user', 'Started a timed quiz (' + qs.length + ' questions from the core textbooks × ' + cfg.seconds + ' s).', '', '', 0),
-    logMentor_(ctx, team.id, stage.id, 'model', '**Question 1 of ' + qs.length + '** (' + cfg.seconds + ' s) — from *' + qs[0].entry + '*\n' + qs[0].q, '', '', 1)
-  ];
-  audit_(ctx, 'quizStart', team.id, stage.code);
-  return { quizId: id, index: 0, total: qs.length, question: qs[0].q, entry: qs[0].entry, seconds: cfg.seconds, limit: cfg.seconds, log: log };
+function projectContext_(team, theme) {
+  const L = [];
+  if (theme) { L.push('THEME: ' + theme.id + ' — ' + theme.name); L.push('Academic focus: ' + theme.subtitle); }
+  if (team.artefact) L.push('ARTEFACT: ' + team.artefact);
+  if (team.title) L.push('PROJECT TITLE: ' + team.title);
+  return L.join('\n');
+}
+/** Textbook study-notes for a theme (built once by the HoD), used to ground questions and marking. */
+function notesText_(themeId) {
+  const all = all_('StudyNotes').filter(n => n.notes);
+  const tagged = t => String(t || '').split(',').map(x => x.trim());
+  // Notes tagged specifically for THIS theme (e.g. battery books for T5/T6) win.
+  const specific = themeId ? all.filter(n => tagged(n.themes).indexOf(themeId) >= 0) : [];
+  const rows = specific.length ? specific : all.filter(n => tagged(n.themes).indexOf('ALL') >= 0 || (themeId && tagged(n.themes).indexOf(themeId) >= 0));
+  if (!rows.length) return '';
+  let out = rows.map(n => '[' + shortBook_(n.book) + ']\n' + n.notes).join('\n\n');
+  if (out.length > 9000) out = out.slice(0, 9000) + '\n…';
+  return out;
+}
+/** Guess which mini-project themes a book covers from its file name. */
+function autoThemes_(name) {
+  const n = String(name || '').toLowerCase().replace(/[_.\-()]+/g, ' ');   // "Power_Electronics_x.pdf" -> "power electronics x pdf"
+  if (/batter|\bbms\b|\bcells?\b|li ?ion|lifepo|state ?of ?charge|\bsoc\b|energy ?storage/.test(n)) return ['T5', 'T6'];
+  if (/power\s*electronic|converter|smps|rectifier|pfc|switch.?mode/.test(n)) return ['T1', 'T4'];
+  if (/machine|motor|drive|induction/.test(n)) return ['T2', 'T3'];
+  if (/control\s*system|signals?\s*(and|&)?\s*systems/.test(n)) return ['ALL'];
+  return [];
 }
 function shortBook_(name) {
   return String(name || '').replace(/\.pdf$/i, '').replace(/\(z-?lib[^)]*\)|\(Z-Library\)/gi, '').replace(/_/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60);
+}
+function quizStart_(ctx, a) {
+  const team = teamAccess_(ctx, a.teamId, 'write');
+  const stage = stageById_(a.stageId);
+  if (!stage) throw new Error('Choose a stage.');
+  const cfg = quizCfg_();
+  const theme = themeById_(team.themeId);
+  const work = stageRecordsText_(team, stage, ctx);
+  const project = projectContext_(team, theme);
+  const notes = notesText_(team.themeId);
+  const m = mentorAccess_(ctx, team);
+  const sys = [
+    'You are the AI Mentor for the ' + DEPARTMENT.course + ', ' + DEPARTMENT.name + ', ' + DEPARTMENT.institution + '.',
+    'Prepare a short oral-style quiz for ONE student about THEIR OWN MINI PROJECT (their theme, artefact and the work they saved for stage ' + stage.code + ' — ' + stage.title + ').',
+    'Write exactly ' + cfg.questions + ' questions. Every question must be about THIS student\'s project. Mix two kinds:',
+    ' (1) questions about their specific saved entries — name or quote the entry (e.g. "Your FR2 says ±1 %, which instrument will measure it and why?");',
+    ' (2) questions that test the engineering fundamental BEHIND their project choices (the governing equation, why a method/topology is used, what a measured value means, what changes if a value changes) — grounded in the reference material below.',
+    work ? '' : 'The student has saved little yet, so ask mostly about the fundamentals of their theme and artefact.',
+    'Each question must be answerable in about ' + cfg.seconds + ' seconds (one or two sentences) and be under 35 words. No answers or hints.',
+    'Return ONLY JSON: {"questions":[{"q":"question text","entry":"short label of what it is about"}]}',
+    '',
+    'THE STUDENT\'S PROJECT:',
+    project,
+    '',
+    'THEIR SAVED WORK FOR ' + stage.code + ':',
+    work || '(nothing saved yet)',
+    '',
+    'HANDBOOK REQUIREMENTS FOR THIS STAGE (source of truth):',
+    handbookStageText_(stage, theme),
+    notes ? '\nREFERENCE NOTES FROM THE CORE TEXTBOOKS (use these for the fundamentals):\n' + notes : ''
+  ].filter(x => x !== '').join('\n');
+  const out = callGemini_(m.key, m.model, sys, [{ role: 'user', parts: [{ text: 'Write the ' + cfg.questions + ' quiz questions now.' }] }], 0.7, 8192, true);
+  const qs = ((parseJson_(out).questions) || []).map(x => typeof x === 'string' ? { q: clean_(x, 400), entry: '' } : { q: clean_(x.q, 400), entry: clean_(x.entry, 120) })
+    .filter(x => x.q).slice(0, cfg.questions);
+  if (qs.length < 3) throw new Error('The AI Mentor could not prepare questions right now. Please try again in a moment.');
+  where_('Quizzes', 'userEmail', ctx.email).filter(q => q.status === 'running').forEach(q => update_('Quizzes', q._row, { status: 'abandoned' }));
+  const id = uid_('qz'), t = now_();
+  insert_('Quizzes', { id: id, teamId: team.id, stageId: stage.id, userEmail: ctx.email, userName: ctx.name, questionsJson: JSON.stringify(qs),
+    resultsJson: '[]', current: 0, askedAt: t, pendingJson: '', status: 'running', score: '', model: m.model, createdAt: t, finishedAt: '' });
+  const log = [
+    logMentor_(ctx, team.id, stage.id, 'user', 'Started a timed quiz on ' + stage.code + ' (' + qs.length + ' questions about my project × ' + cfg.seconds + ' s).', m.model, '', 0),
+    logMentor_(ctx, team.id, stage.id, 'model', '**Question 1 of ' + qs.length + '** (' + cfg.seconds + ' s)' + (qs[0].entry ? ' — about *' + qs[0].entry + '*' : '') + '\n' + qs[0].q, m.model, '', 1)
+  ];
+  audit_(ctx, 'quizStart', team.id, stage.code);
+  return { quizId: id, index: 0, total: qs.length, question: qs[0].q, entry: qs[0].entry, seconds: cfg.seconds, limit: cfg.seconds, log: log };
 }
 function quizAnswer_(ctx, a) {
   const q = one_('Quizzes', 'id', a.quizId);
@@ -1551,18 +1601,26 @@ function quizAnswer_(ctx, a) {
     log.push(logMentor_(ctx, team.id, q.stageId, 'user', pend.answer ? 'A' + (i + 1) + ': ' + pend.answer : (late ? '(time up — no answer counted)' : '(no answer)'), q.model, '', 0));
   }
   const stage = stageById_(q.stageId) || { code: '' };
+  const theme = themeById_(team.themeId);
   const m = mentorAccess_(ctx, team);
+  const notes = notesText_(team.themeId);
   const sys = [
-    'You are the AI Mentor marking ONE quiz answer of a 5th-semester EEE student. Talk directly to the student ("you") in a friendly, encouraging mentor voice, in simple English.',
-    'The question was written from the core textbook named below. The MODEL ANSWER (from that book) is the reference: judge the student only against it and sound engineering. Do not demand extra details the model answer does not need.',
-    'Mark 0, 1 or 2: 2 = correct and specific (main idea, equation or reason right); 1 = partly correct, incomplete or vague; 0 = wrong, blank, off-topic or time ran out.',
+    'You are the AI Mentor marking ONE quiz answer of a 5th-semester EEE student about their own mini project. Talk directly to the student ("you") in a friendly, encouraging mentor voice, in simple English.',
+    'Mark 0, 1 or 2: 2 = correct, specific and sound engineering; 1 = partly correct, incomplete or vague; 0 = wrong, blank, off-topic or time ran out.',
     'Then respond like a mentor:',
     '- If 2: confirm briefly why the answer is right (1–2 sentences).',
-    '- If 0 or 1: say what was wrong or missing, starting with "You answered … but …" (or "You did not answer in time." if blank), then explain THE CORRECT WAY TO ANSWER in 2–4 sentences, based on the model answer.',
-    'Keep feedback under 90 words in total. Write in your own words; do not copy long passages from the book.',
-    'Return ONLY JSON: {"mark":0,"verdict":"correct|partly correct|incorrect","feedback":"what was right/wrong in their answer","correct_way":"the correct way to answer (empty if mark is 2)"}'
-  ].join('\n');
-  const userMsg = 'BOOK: ' + (qs[i].book || qs[i].entry || '') + '\nQUESTION: ' + qs[i].q + '\nMODEL ANSWER (from the book): ' + (qs[i].answer || '(not available — judge by sound engineering)') + '\nSTUDENT ANSWER: ' + (pend.answer || '(no answer — time ran out)');
+    '- If 0 or 1: say what was wrong or missing, starting with "You answered … but …" (or "You did not answer in time." if blank), then explain THE CORRECT WAY TO ANSWER — the right reasoning, equation, unit or measurement method — in 2–4 sentences.',
+    'Keep feedback under 90 words. Judge using the student\'s saved work, the handbook, and the textbook reference notes below; do not invent requirements and do not copy long passages.',
+    'Return ONLY JSON: {"mark":0,"verdict":"correct|partly correct|incorrect","feedback":"what was right/wrong in their answer","correct_way":"the correct way to answer (empty if mark is 2)"}',
+    '',
+    'HANDBOOK REQUIREMENTS FOR THIS STAGE:',
+    handbookStageText_(stage, theme),
+    '',
+    'THEIR SAVED WORK — ' + stage.code + ':',
+    stageRecordsText_(team, stage, ctx),
+    notes ? '\nTEXTBOOK REFERENCE NOTES:\n' + notes : ''
+  ].filter(x => x !== '').join('\n');
+  const userMsg = 'QUESTION: ' + qs[i].q + (qs[i].entry ? '\n(About: ' + qs[i].entry + ')' : '') + '\nSTUDENT ANSWER: ' + (pend.answer || '(no answer — time ran out)');
   const res = parseJson_(callGemini_(m.key, m.model, sys, [{ role: 'user', parts: [{ text: userMsg }] }], 0.3, 8192, true));
   let mark = Math.round(Number(res.mark));
   if (isNaN(mark)) mark = 0;
@@ -1582,7 +1640,7 @@ function quizAnswer_(ctx, a) {
     const band = score >= 9 ? 'Exemplary' : score >= 7 ? 'Competent' : score >= 4 ? 'Developing' : 'Inadequate';
     const summary = '**Quiz score: ' + score + '/10** — ' + band + (stage.code ? ' (' + stage.code + ')' : '') + '\n' +
       results.map((r, k) => '- Q' + (k + 1) + ' — ' + r.mark + '/2 ' + (r.mark === 2 ? '✅' : r.mark === 1 ? '🟡' : '❌') + (r.late ? ' (time up)' : ' (' + r.seconds + ' s)')).join('\n') +
-      '\n\nRead the feedback above, revise these topics in the core textbooks, and try again with a new quiz.';
+      '\n\nRead the feedback above, revise these topics (handbook + textbooks) and improve your ' + (stage.code || 'project') + ' work, then try again.';
     log.push(logMentor_(ctx, team.id, q.stageId, 'model', summary, m.model, String(score), 2));
     upd.status = 'done'; upd.score = String(score); upd.finishedAt = now_();
     out.score = score; out.band = band; out.results = results;
@@ -1737,7 +1795,7 @@ function booksFolder_() {
 function booksList_(ctx) {
   const folder = booksFolder_();
   const counts = {};
-  all_('QuestionBank').forEach(q => { counts[q.fileId] = (counts[q.fileId] || 0) + (bool_(q.active) ? 1 : 0); });
+  all_('StudyNotes').forEach(q => { counts[q.fileId] = (counts[q.fileId] || 0) + 1; });
   const status = safeJson_(PROP.getProperty('QB_STATUS'), {});
   const books = [];
   const it = folder.getFiles();
@@ -1745,12 +1803,14 @@ function booksList_(ctx) {
     const f = it.next();
     if (f.getMimeType() !== 'application/pdf' && !/\.pdf$/i.test(f.getName())) continue;
     const size = f.getSize();
+    const noteRow = all_('StudyNotes').filter(n => n.fileId === f.getId())[0];
     books.push({ id: f.getId(), name: f.getName(), short: shortBook_(f.getName()), sizeMB: Math.round(size / 1048576 * 10) / 10, tooBig: size > BOOK_MAX_BYTES,
-                 count: counts[f.getId()] || 0, lastRun: (status[f.getId()] || {}).at || '', error: (status[f.getId()] || {}).error || '' });
+                 count: counts[f.getId()] || 0, themes: noteRow ? noteRow.themes : '', suggest: autoThemes_(f.getName()).join(','),
+                 lastRun: (status[f.getId()] || {}).at || '', error: (status[f.getId()] || {}).error || '' });
   }
   books.sort((x, y) => x.name.localeCompare(y.name));
   return { folderId: settings_().booksFolderId, folderName: folder.getName(), folderUrl: folder.getUrl(), books: books,
-           total: Object.keys(counts).reduce((n, k) => n + counts[k], 0), quizSeconds: quizCfg_().seconds, quizQuestions: quizCfg_().questions };
+           total: all_('StudyNotes').length, quizSeconds: quizCfg_().seconds, quizQuestions: quizCfg_().questions };
 }
 function adminGeminiKey_() {
   const rk = resolveTeamKey_({ apiKeyId: '', model: '' });
@@ -1789,68 +1849,61 @@ function geminiFileUri_(key, file) {
   PROP.setProperty(cacheKey, JSON.stringify({ uri: info.file.uri, exp: Date.now() + 46 * 3600 * 1000 }));
   return info.file.uri;
 }
-function buildQuestions_(ctx, a) {
+function buildNotes_(ctx, a) {
   const folder = booksFolder_();
   const file = DriveApp.getFileById(a.fileId);
   let inFolder = false; const ps = file.getParents(); while (ps.hasNext()) { if (ps.next().getId() === folder.getId()) inFolder = true; }
   if (!inFolder) throw new Error('That file is not in the books folder.');
-  const n = Math.max(5, Math.min(25, Number(a.count) || 15));
   const status = safeJson_(PROP.getProperty('QB_STATUS'), {});
+  const forced = (Array.isArray(a.themes) && a.themes.length ? a.themes : autoThemes_(file.getName()))
+    .map(v => String(v || '').toUpperCase().trim()).filter(v => v === 'ALL' || /^T[1-6]$/.test(v));
   try {
     const k = adminGeminiKey_();
     const uri = geminiFileUri_(k.key, file);
-    const existing = all_('QuestionBank').filter(q => q.fileId === file.getId());
-    const used = existing.map(q => q.topic).filter((t, i, arr) => t && arr.indexOf(t) === i).slice(0, 80).join('; ');
-    const themes = THEMES.map(t => t.id + ' = ' + t.name).join('; ');
+    const themeList = THEMES.map(t => t.id + ' = ' + t.name).join('; ');
+    const focus = forced.length && forced.indexOf('ALL') < 0
+      ? 'This book is for these mini-project themes: ' + forced.map(id => (themeById_(id) || {}).name || id).join(', ') + '. Focus the notes on what those projects need.'
+      : 'Cover concepts useful for these mini-project themes: ' + themeList + '.';
     const prompt = [
-      'You are preparing quiz questions for 5th-semester B.E. Electrical & Electronics Engineering students (' + DEPARTMENT.institution + ') doing mini projects.',
-      'Use ONLY the attached textbook "' + shortBook_(file.getName()) + '". Every question and model answer must come from what this book teaches.',
-      'Write ' + n + ' NEW questions. Level: good and thoughtful but answerable in 1–2 typed sentences within about ' + quizCfg_().seconds + ' seconds — not a bare definition, not a long derivation. Good types: "why" / "what happens if" / compare two things / pick the right equation and explain / a quick numeric reasoning with simple numbers.',
-      'Spread the questions over different chapters. Prefer topics useful for these mini-project themes: ' + themes + '.',
-      used ? 'Topics ALREADY used for this book (choose different ones): ' + used + '.' : '',
-      'For each question give a MODEL ANSWER in your own words (2–4 sentences: the key idea, equation with units if any). Do not copy sentences from the book.',
-      'Tag each question with the theme ids it fits (from the list), or ["ALL"] if it is general.',
-      'Return ONLY JSON: {"questions":[{"topic":"short chapter/topic name","themes":["T1"],"level":"medium|hard","q":"question","answer":"model answer"}]}'
-    ].filter(String).join('\n');
-    const out = callGemini_(k.key, k.model, 'You write fair, accurate engineering quiz questions strictly from the attached book.',
-      [{ role: 'user', parts: [{ file_data: { mime_type: 'application/pdf', file_uri: uri } }, { text: prompt }] }], 0.6, 16384, true);
-    const items = (parseJson_(out).questions || []).filter(x => x && x.q && x.answer).slice(0, n);
-    if (!items.length) throw new Error('Gemini returned no questions. Please try again.');
+      'You are preparing concise STUDY NOTES from the attached textbook "' + shortBook_(file.getName()) + '" for 5th-semester B.E. EEE students doing mini projects.',
+      focus,
+      'Summarise the key engineering concepts, governing equations (with symbols/units), methods and common pitfalls the book teaches. Tight bullet notes, grouped by topic, 250–500 words. Cover only what the book actually teaches.',
+      forced.length ? '' : 'Also list which theme ids (T1..T6, or ALL) these notes are most relevant to.',
+      'Return ONLY JSON: {"themes":["T5","T6"],"notes":"- bullet\\n- bullet ..."}'
+    ].filter(Boolean).join('\n');
+    const out = parseJson_(callGemini_(k.key, k.model, 'You write accurate, concise engineering study notes strictly from the attached book.',
+      [{ role: 'user', parts: [{ file_data: { mime_type: 'application/pdf', file_uri: uri } }, { text: prompt }] }], 0.4, 16384, true));
+    const notes = clean_(out.notes, 8000);
+    if (!notes) throw new Error('Gemini returned no notes. Please try again.');
+    const gTh = (Array.isArray(out.themes) ? out.themes : [out.themes]).map(v => String(v || '').toUpperCase().trim()).filter(v => v === 'ALL' || /^T[1-6]$/.test(v));
+    const th = forced.length ? forced : gTh;   // HoD's choice / file-name match beats the AI's guess
     const t = now_();
-    withLock_(() => {
-      const sh = sheet_('QuestionBank'), h = headers_(sh);
-      const rows = items.map(x => {
-        const th = (Array.isArray(x.themes) ? x.themes : [x.themes]).map(v => String(v || '').toUpperCase().trim()).filter(v => v === 'ALL' || /^T[1-6]$/.test(v));
-        const o = { id: uid_('qb'), book: file.getName(), fileId: file.getId(), topic: clean_(x.topic, 120), themes: (th.length ? th : ['ALL']).join(','),
-                    level: /hard/i.test(x.level) ? 'hard' : 'medium', question: clean_(x.q, 600), answer: clean_(x.answer, 1500), createdAt: t, active: 'true' };
-        return h.map(k2 => cellv_(o[k2]));
-      });
-      sh.getRange(sh.getLastRow() + 1, 1, rows.length, h.length).setValues(rows);
-    });
+    // replace any previous notes for this book
+    all_('StudyNotes').filter(n => n.fileId === file.getId()).sort((x, y) => y._row - x._row).forEach(n => remove_('StudyNotes', n._row));
+    insert_('StudyNotes', { id: uid_('sn'), book: file.getName(), fileId: file.getId(), themes: (th.length ? th : ['ALL']).join(','), notes: notes, createdAt: t });
     status[file.getId()] = { at: t, error: '' };
     PROP.setProperty('QB_STATUS', JSON.stringify(status));
-    audit_(ctx, 'buildQuestions', '', shortBook_(file.getName()) + ': +' + items.length);
-    return { added: items.length, book: shortBook_(file.getName()) };
+    audit_(ctx, 'buildNotes', '', shortBook_(file.getName()));
+    return { ok: true, book: shortBook_(file.getName()), words: notes.split(/\s+/).length, themes: (th.length ? th : ['ALL']).join(',') };
   } catch (e) {
     status[file.getId()] = { at: now_(), error: String(e.message || e).slice(0, 300) };
     PROP.setProperty('QB_STATUS', JSON.stringify(status));
     throw e;
   }
 }
-function bankList_(ctx, a) {
-  return all_('QuestionBank').filter(q => !a.fileId || q.fileId === a.fileId).slice(-500).reverse()
-    .map(q => ({ id: q.id, book: shortBook_(q.book), topic: q.topic, themes: q.themes, level: q.level, question: q.question, answer: q.answer, active: bool_(q.active) }));
+function notesList_(ctx, a) {
+  return all_('StudyNotes').map(n => ({ id: n.id, book: shortBook_(n.book), themes: n.themes, notes: n.notes, createdAt: n.createdAt }));
 }
-function setQuestion_(ctx, a) {
-  const q = one_('QuestionBank', 'id', a.id);
-  if (!q) throw new Error('Question not found.');
-  if (a.remove) { remove_('QuestionBank', q._row); return true; }
-  update_('QuestionBank', q._row, { active: a.active ? 'true' : 'false' });
+function deleteNote_(ctx, a) {
+  const n = one_('StudyNotes', 'id', a.id);
+  if (!n) throw new Error('Notes not found.');
+  remove_('StudyNotes', n._row);
+  audit_(ctx, 'deleteNote', '', shortBook_(n.book));
   return true;
 }
-function clearBank_(ctx, a) {
-  const rows = all_('QuestionBank').filter(q => !a.fileId || q.fileId === a.fileId).sort((x, y) => y._row - x._row);
-  rows.forEach(q => remove_('QuestionBank', q._row));
-  audit_(ctx, 'clearBank', '', a.fileId || 'all');
+function clearNotes_(ctx, a) {
+  const rows = all_('StudyNotes').sort((x, y) => y._row - x._row);
+  rows.forEach(n => remove_('StudyNotes', n._row));
+  audit_(ctx, 'clearNotes', '', String(rows.length));
   return rows.length;
 }

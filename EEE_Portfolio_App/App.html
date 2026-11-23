@@ -1535,31 +1535,42 @@
       try {
         const d = await call('booksList');
         const books = el('div', { class: 'stack' }, d.books.map(bk => {
-          const nIn = el('input', { type: 'number', min: 5, max: 25, value: 15, style: { width: '70px' } });
-          const btn = el('button', { class: 'btn primary sm', disabled: bk.tooBig }, icon('bot'), bk.count ? 'Add more' : 'Build questions');
-          btn.onclick = async () => { busy(btn, true, 'Reading book & writing questions… (up to a minute)'); try { const r = await call('buildQuestions', { fileId: bk.id, count: nIn.value }); toast('Added ' + r.added + ' questions from ' + r.book + '.', 'ok'); load(); drawBank(); } catch (e) { toast(e.message, 'bad'); busy(btn, false); } };
-          return el('div', { class: 'row between', style: { padding: '8px 0', borderBottom: '1px solid var(--line)' } },
-            el('div', { style: { minWidth: 0 } }, el('b', null, bk.short), el('div', { class: 'tiny muted' }, bk.sizeMB + ' MB · ' + bk.count + ' questions in bank' + (bk.error ? ' · last error: ' + bk.error : bk.lastRun ? ' · built ' + fmt(bk.lastRun) : '')), bk.tooBig ? el('div', { class: 'tiny', style: { color: 'var(--bad)' } }, 'Too big to send — split into chapter PDFs') : null),
-            el('div', { class: 'row', style: { flexWrap: 'nowrap' } }, nIn, btn));
+          const btn = el('button', { class: 'btn primary sm', disabled: bk.tooBig }, icon('bot'), bk.count ? 'Rebuild notes' : 'Build study notes');
+          // which project themes this book is for (pre-ticked from saved tags or the file name, e.g. battery books -> T5, T6)
+          const pre = String(bk.themes || bk.suggest || '').split(',').map(x => x.trim()).filter(Boolean);
+          const boxes = ['T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'ALL'].map(id => {
+            const th = theme(id);
+            const cb = el('input', { type: 'checkbox', checked: pre.indexOf(id) >= 0 });
+            return { id, cb, node: el('label', { class: 'tiny', title: th ? th.name : 'General (all themes)', style: { display: 'inline-flex', alignItems: 'center', gap: '3px', marginRight: '8px', cursor: 'pointer' } }, cb, id === 'ALL' ? 'All' : id + ' ' + (th ? th.short : '')) };
+          });
+          btn.onclick = async () => {
+            const picked = boxes.filter(b => b.cb.checked).map(b => b.id);
+            busy(btn, true, 'Reading the book & writing notes… (up to a minute)');
+            try { const r = await call('buildNotes', { fileId: bk.id, themes: picked }); toast('Study notes built from ' + r.book + ' (' + r.words + ' words, themes ' + r.themes + ').', 'ok'); load(); drawBank(); }
+            catch (e) { toast(e.message, 'bad'); busy(btn, false); }
+          };
+          return el('div', { style: { padding: '10px 0', borderBottom: '1px solid var(--line)' } },
+            el('div', { class: 'row between' },
+              el('div', { style: { minWidth: 0 } }, el('b', null, bk.short), el('div', { class: 'tiny muted' }, bk.sizeMB + ' MB · ' + (bk.count ? 'notes ready (' + (bk.themes || 'ALL') + ')' : 'no notes yet') + (bk.error ? ' · last error: ' + bk.error : bk.lastRun ? ' · built ' + fmt(bk.lastRun) : '')), bk.tooBig ? el('div', { class: 'tiny', style: { color: 'var(--bad)' } }, 'Too big to send — split into chapter PDFs') : null),
+              el('div', { class: 'row', style: { flexWrap: 'nowrap' } }, btn)),
+            el('div', { style: { marginTop: '6px' } }, el('span', { class: 'tiny muted', style: { marginRight: '6px' } }, 'Used for:'), boxes.map(b => b.node)));
         }));
-        clear(info).appendChild(el('div', null, el('div', { class: 'card-h' }, icon('book'), el('h3', { style: { flex: 1 } }, 'Core textbooks'), el('a', { class: 'small', href: d.folderUrl, target: '_blank', rel: 'noopener noreferrer' }, 'Open folder'), el('button', { class: 'btn ghost sm', onclick: load }, icon('refresh'))),
-          el('div', { class: 'card-b' }, el('p', { class: 'small muted' }, 'The AI reads each textbook once and writes quiz questions with model answers into the bank. Students then get ' + d.quizQuestions + ' random questions (' + d.quizSeconds + ' s each) from the bank. ', el('b', null, 'Total in bank: ' + d.total + ' questions')),
+        clear(info).appendChild(el('div', null, el('div', { class: 'card-h' }, icon('book'), el('h3', { style: { flex: 1 } }, 'Core textbooks → study notes'), el('a', { class: 'small', href: d.folderUrl, target: '_blank', rel: 'noopener noreferrer' }, 'Open folder'), el('button', { class: 'btn ghost sm', onclick: load }, icon('refresh'))),
+          el('div', { class: 'card-b' }, el('p', { class: 'small muted' }, 'The quiz always asks each student about their OWN project. The AI reads each textbook once into short engineering notes and uses them (with the handbook) for deeper fundamentals and marking. Tick which themes each book is for: a team only gets notes from books ticked for its theme — e.g. battery books ticked T5 + T6 are used for the Battery Protection and Battery Management teams only. Books whose name mentions battery / BMS / cell are pre-ticked T5 + T6. Quizzes still work with no notes built.'),
             books.children.length ? books : el('p', { class: 'muted' }, 'No PDF books found in the folder.'))));
       } catch (e) { clear(info).appendChild(el('div', { class: 'card-b' }, el('div', { class: 'alert bad' }, icon('alert'), e.message))); }
     };
     const drawBank = async () => {
-      clear(bankWrap).appendChild(loader('Loading question bank…'));
+      clear(bankWrap).appendChild(loader('Loading study notes…'));
       try {
-        const rows = await call('bankList', {});
-        clear(bankWrap).appendChild(tableCard('Question bank (' + rows.length + ')', rows.length ? el('button', { class: 'btn danger sm', onclick: async () => { if (!(await confirmBox('Clear the whole bank', 'Delete ALL ' + rows.length + ' questions? You can rebuild them from the books.', 'Delete all', true))) return; try { await call('clearBank', {}); load(); drawBank(); } catch (e) { toast(e.message, 'bad'); } } }, icon('trash'), 'Clear all') : null,
-          ['Book', 'Topic', 'Themes', 'Question', 'Model answer', ''],
-          rows.map(q => el('tr', { style: q.active ? null : { opacity: 0.5 } },
-            el('td', { class: 'small' }, q.book), el('td', { class: 'small' }, q.topic), el('td', null, el('span', { class: 'badge' }, q.themes)),
-            el('td', { class: 'small', style: { maxWidth: '320px' } }, q.question), el('td', { class: 'small muted', style: { maxWidth: '300px' } }, q.answer),
-            el('td', null, el('div', { class: 'row', style: { flexWrap: 'nowrap' } },
-              el('button', { class: 'btn ghost sm', title: q.active ? 'Hide from quizzes' : 'Use in quizzes', onclick: async () => { try { await call('setQuestion', { id: q.id, active: !q.active }); drawBank(); } catch (e) { toast(e.message, 'bad'); } } }, q.active ? icon('check') : icon('x')),
-              el('button', { class: 'btn ghost sm', title: 'Delete', onclick: async () => { try { await call('setQuestion', { id: q.id, remove: true }); drawBank(); load(); } catch (e) { toast(e.message, 'bad'); } } }, icon('trash')))))),
-          'No questions yet. Build them from the books above.'));
+        const rows = await call('notesList', {});
+        clear(bankWrap).appendChild(tableCard('Study notes (' + rows.length + ')', rows.length ? el('button', { class: 'btn danger sm', onclick: async () => { if (!(await confirmBox('Clear all notes', 'Delete ALL study notes? Quizzes will fall back to the handbook until you rebuild them.', 'Delete all', true))) return; try { await call('clearNotes', {}); load(); drawBank(); } catch (e) { toast(e.message, 'bad'); } } }, icon('trash'), 'Clear all') : null,
+          ['Book', 'Themes', 'Notes', ''],
+          rows.map(q => el('tr', null,
+            el('td', { class: 'small' }, q.book), el('td', null, el('span', { class: 'badge' }, q.themes)),
+            el('td', { class: 'small muted', style: { maxWidth: '520px', whiteSpace: 'pre-wrap' } }, (q.notes || '').slice(0, 400) + ((q.notes || '').length > 400 ? '…' : '')),
+            el('td', null, el('button', { class: 'btn ghost sm', title: 'Delete', onclick: async () => { try { await call('deleteNote', { id: q.id }); drawBank(); load(); } catch (e) { toast(e.message, 'bad'); } } }, icon('trash'))))),
+          'No study notes yet (optional). Quizzes still work from each student’s project and the handbook.'));
       } catch (e) { clear(bankWrap).appendChild(el('div', { class: 'alert bad' }, e.message)); }
     };
     pane.appendChild(info); pane.appendChild(bankWrap); load(); drawBank();
