@@ -7,7 +7,6 @@
  * ========================================================================== */
 (function () {
   'use strict';
-
   /* ==========================================================================
    * 1. Client-side hardening (deterrents — real security is server-side)
    * ======================================================================== */
@@ -97,7 +96,6 @@
     document.addEventListener('textInput', e => { if (pasteBlocked(e.target) && texty(e.target) && e.data && e.data.length > MAX_BURST) stop(e); }, true);
     return { isField: isField, setNoPaste: v => { noPaste = !!v; document.body.classList.toggle('no-copy', noPaste); } };
   })();
-
   /* ==========================================================================
    * 2. Utilities
    * ======================================================================== */
@@ -130,7 +128,9 @@
     refresh: '<path d="M21 12a9 9 0 1 1-2.6-6.4L21 8"/><path d="M21 3v5h-5"/>',
     msg: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
     star: '<path d="m12 2 3.1 6.3 6.9 1-5 4.9 1.2 6.8L12 17.8 5.8 21l1.2-6.8-5-4.9 6.9-1z"/>',
-    clip: '<path d="m21.4 11.1-9.2 9.2a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5"/>'
+    clip: '<path d="m21.4 11.1-9.2 9.2a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5"/>',
+    bell: '<path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/>',
+    help: '<circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 2.5-3 4.5"/><path d="M12 17h.01"/>'
   };
   function icon(name) {
     const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -251,7 +251,6 @@
     return el('span', { class: 'badge ' + cls, title: 'AI Mentor score against the handbook rubric (Ch.5 bands)' }, icon('star'), ' AI handbook score ' + n + '/10 · ' + band);
   }
   function decisionBadge(d) { return d === 'Cleared' ? el('span', { class: 'badge ok dot' }, 'Cleared') : d === 'Not cleared' ? el('span', { class: 'badge bad dot' }, 'Not cleared') : d === 'In progress' ? el('span', { class: 'badge warn dot' }, 'In progress') : el('span', { class: 'badge' }, 'Pending'); }
-
   /* ==========================================================================
    * 3. RPC
    * ======================================================================== */
@@ -268,10 +267,9 @@
           }
         })
         .withFailureHandler(e => reject(new Error((e && e.message) || 'Network error. Check your connection and try again.')))
-        .api({ token: TOKEN, action: action, args: args || {} });
+        .api({ token: TOKEN, noGoogle: pref('eee_nogoogle') === '1', action: action, args: args || {} });
     });
   }
-
   /* ==========================================================================
    * 4. State
    * ======================================================================== */
@@ -284,10 +282,8 @@
   const isDirty = () => Object.keys(S.dirty).length > 0;
   async function leaveOk() { if (!isDirty()) return true; const ok = await confirmBox('Unsaved changes', 'You have unsaved changes. Leave without saving?', 'Discard changes', true); if (ok) S.dirty = {}; return ok; }
   window.addEventListener('beforeunload', e => { if (isDirty()) { e.preventDefault(); e.returnValue = ''; } });
-
   const root = document.getElementById('root');
   (function applyTheme() { const t = pref('eee_theme'); if (t) document.documentElement.setAttribute('data-theme', t); })();
-
   /* ==========================================================================
    * 5. Boot & authentication
    * ======================================================================== */
@@ -307,7 +303,6 @@
       clear(root).appendChild(el('div', { class: 'content' }, el('div', { class: 'alert bad' }, icon('alert'), el('div', null, el('b', null, 'Could not load the portfolio. '), e.message)), el('p'), el('button', { class: 'btn', onclick: boot }, icon('refresh'), 'Retry')));
     }
   }
-
   function logoImg(cls) { return window.KLE_LOGO ? el('div', { class: 'kle-logo ' + (cls || '') }, el('img', { src: window.KLE_LOGO, alt: 'KLE Technological University', draggable: 'false' })) : null; }
   function authArt(dept) {
     return el('div', { class: 'auth-art' },
@@ -321,7 +316,6 @@
           el('div', { class: 'stagesline' }, ['S1 FRs', 'S2 SFD', 'S3 Plant', 'S4 Design', 'S5 Predict & Build', 'S6 Closed loop', 'S7 Validate'].map(s => el('span', null, s))))),
       el('div', { class: 'small', style: { opacity: .7 } }, dept.cluster + ' · Handbook ' + dept.handbookVersion));
   }
-
   function renderLogin() {
     const dept = S.boot.dept;
     const email = el('input', { type: 'email', autocomplete: 'email', placeholder: 'name@institution.edu' });
@@ -356,7 +350,6 @@
         el('div', { class: 'hint', style: { marginTop: '28px' } }, el('span', { class: 'row' }, icon('shield'), ' Secured sign-in. Access is limited to registered faculty and students.'))))));
     email.focus();
   }
-
   function renderNotRostered() {
     clear(root).appendChild(el('div', { class: 'auth' }, authArt(S.boot.dept), el('div', { class: 'auth-form' }, el('div', { class: 'auth-card' },
       el('h2', null, 'Access not yet granted'),
@@ -364,13 +357,12 @@
       el('p', { class: 'muted' }, 'Ask the HoD / portfolio administrator to add you as faculty or student.'),
       TOKEN ? el('button', { class: 'btn', onclick: logout }, icon('logout'), 'Use a different account') : null))));
   }
-
   async function logout() {
     if (!(await leaveOk())) return;
     try { await call('logout'); } catch (e) { /* ignore */ }
+    pref('eee_nogoogle', '1');   // after Sign out only email + sign-in code works in this browser
     TOKEN = ''; store('eee_tok', null); boot();
   }
-
   /* ==========================================================================
    * 6. Shell
    * ======================================================================== */
@@ -399,12 +391,31 @@
       el('div', { class: 'main' },
         el('header', { class: 'topbar' },
           el('button', { class: 'btn ghost sm menu-btn', 'aria-label': 'Open menu', onclick: () => appEl.classList.add('nav-open') }, icon('menu')),
-          titleEl, el('div', { class: 'spacer' }), themeBtn,
+          titleEl, el('div', { class: 'spacer' }), announceBell(), themeBtn,
           el('div', { class: 'user-chip' }, el('div', { class: 'avatar' }, initials(u.name)), el('div', { class: 'user-meta' }, el('b', null, u.name || u.email), el('span', { class: 'tiny muted' }, myRole()))),
           el('button', { class: 'btn ghost sm', title: 'Sign out', 'aria-label': 'Sign out', onclick: logout }, icon('logout'))),
         contentEl,
         el('footer', { class: 'app-foot' }, el('span', null, '© ' + new Date().getFullYear() + ' ' + d.institution + ' · ' + d.name), el('span', null, d.cycleName + ' · Handbook ' + d.handbookVersion))));
     clear(root).appendChild(appEl);
+  }
+  function announceBell() {
+    const wrap = el('button', { class: 'btn ghost sm', style: { position: 'relative' }, title: 'Announcements', 'aria-label': 'Announcements', onclick: showAnnouncements }, icon('bell'));
+    const list = (S.boot.announcements || []);
+    let seen = {}; try { seen = JSON.parse(pref('eee_seen_ann') || '{}'); } catch (e) { seen = {}; }
+    const unseen = list.filter(a => !seen[a.id]).length;
+    if (unseen) wrap.appendChild(el('span', { style: { position: 'absolute', top: '-2px', right: '-2px', minWidth: '16px', height: '16px', padding: '0 4px', borderRadius: '9px', background: 'var(--bad)', color: '#fff', fontSize: '10px', fontWeight: '700', lineHeight: '16px', textAlign: 'center' } }, unseen > 9 ? '9+' : String(unseen)));
+    return wrap;
+  }
+  function showAnnouncements() {
+    const list = (S.boot.announcements || []);
+    const seen = {}; list.forEach(a => seen[a.id] = 1);
+    try { pref('eee_seen_ann', JSON.stringify(seen)); } catch (e) {}
+    const body = list.length ? el('div', { class: 'stack' }, list.map(a => el('div', { class: 'card', style: { borderLeft: '4px solid var(--brand)' } }, el('div', { class: 'card-b' },
+      el('div', { class: 'row between' }, el('b', null, a.title), el('span', { class: 'badge ' + (a.audience === 'staff' ? 'warn' : a.audience === 'students' ? 'brand' : '') }, a.audience === 'all' ? 'Everyone' : a.audience === 'staff' ? 'Staff' : 'Students')),
+      el('div', { class: 'small muted', style: { margin: '2px 0 8px' } }, (a.createdBy || 'HoD Office') + ' · ' + fmt(a.createdAt) + (a.emailed ? ' · emailed' : '')),
+      el('div', { class: 'selectable', style: { whiteSpace: 'pre-wrap' } }, a.message)))))
+      : el('p', { class: 'muted' }, 'No announcements yet.');
+    modal({ title: 'Announcements', wide: true, body: body, actions: [{ label: 'Close', cls: 'primary', fn: c => { c(); const badge = document.querySelector('.topbar .btn.ghost span'); if (badge && /^\d|9\+/.test(badge.textContent)) badge.remove(); } }] });
   }
   function renderNav() {
     clear(navEl);
@@ -439,7 +450,6 @@
     clear(titleEl).appendChild(el('span', { class: 't1' }, t));
     titleEl.appendChild(el('span', { class: 't2' }, sub || (d.shortName + ' · ' + d.course + ' · ' + d.semester + ' · AY ' + d.academicYear)));
   }
-
   /* ==========================================================================
    * 7. Dashboard (admin / faculty)
    * ======================================================================== */
@@ -491,12 +501,10 @@
         body))));
     draw();
   }
-
   /* ==========================================================================
    * 8. Team portfolio
    * ======================================================================== */
   async function loadTeam() { S.team = await call('getTeam', { teamId: S.teamId }); return S.team; }
-
   async function viewTeam() {
     setTitle('Portfolio');
     if (!S.teamId) {
@@ -507,9 +515,7 @@
     try { await loadTeam(); } catch (e) { clear(contentEl).appendChild(el('div', { class: 'alert bad' }, icon('alert'), e.message)); return; }
     drawTeam();
   }
-
   function overallPct() { const st = stageList(); const p = S.team.progress; return st.length ? st.reduce((a, s) => a + ((p[s.id] || {}).pct || 0), 0) / st.length : 0; }
-
   function drawTeam() {
     const T = S.team, th = theme(T.team.themeId) || {};
     setTitle(T.team.name, T.team.title || undefined);
@@ -525,7 +531,6 @@
           el('div', { class: 'small muted', style: { marginTop: '6px' } }, 'Guide: ', el('b', null, T.guide ? T.guide.name : '—'), T.coGuide ? ' · Co-guide: ' + T.coGuide.name : '', ' · Members: ', T.members.map(m => m.name).join(', ') || '—')),
         el('div', { class: 'row' }, el('span', { class: 'badge ' + (T.debugCycles >= 3 ? 'ok' : T.debugCycles ? 'warn' : '') }, 'Debug cycles: ' + T.debugCycles), T.flags.length ? el('span', { class: 'badge bad' }, '⚑ ' + T.flags.length + ' integrity flag(s)') : null)),
       T.flags.length && S.boot.user.role !== 'student' ? el('div', { class: 'alert bad', style: { marginTop: '12px' } }, icon('alert'), el('div', null, T.flags.map(f => el('div', null, f)))) : null)));
-
     const tabs = [['portfolio', 'Portfolio'], ['reviews', S.boot.user.role === 'student' ? 'Reviews & Feedback' : 'Reviews & Assessment'], ['mentor', 'AI Mentor'], ['info', 'Team & Evidence']];
     c.appendChild(el('div', { class: 'tabs', role: 'tablist' }, tabs.map(t => el('button', { class: S.tab === t[0] ? 'active' : '', role: 'tab', onclick: async () => { if (!(await leaveOk())) return; S.tab = t[0]; drawTeam(); } }, t[1]))));
     const pane = el('div');
@@ -535,7 +540,6 @@
     else if (S.tab === 'mentor') drawMentor(pane);
     else drawInfo(pane);
   }
-
   function viewWebsite(e) {
     const frame = el('iframe', { title: 'Project website', sandbox: 'allow-scripts allow-popups allow-forms', referrerpolicy: 'no-referrer', style: { width: '100%', height: '70vh', border: '1px solid var(--line)', borderRadius: '10px', background: '#fff' } });
     const m = modal({ title: 'Project website — ' + e.name, wide: true, body: el('div', null, el('div', { class: 'small muted', style: { marginBottom: '8px' } }, 'Uploaded by ' + e.uploadedBy + ' · ' + fmt(e.uploadedAt) + ' · shown in a safe sandbox'), frame), actions: [{ label: 'Close', fn: c => c() }] });
@@ -550,7 +554,6 @@
     if (!/^https?:\/\//i.test(url)) return null;   // only http(s) links are ever rendered
     return el('div', { class: 'small', style: { marginTop: '4px' } }, el('a', { href: url, target: '_blank', rel: 'noopener noreferrer' }, icon('link'), ' Project website'));
   }
-
   /* ---------- Portfolio: stage navigator + stage content ---------- */
   function drawPortfolio(pane) {
     const stages = stageList();
@@ -568,7 +571,6 @@
     pane.appendChild(el('div', { class: 'port' }, el('div', { class: 'card stages' }, el('div', { class: 'card-h' }, el('h3', null, S.boot.dept.cycleName)), nav), main));
     drawStage(main, stages.filter(s => s.id === S.stageId)[0]);
   }
-
   function canEditStage(stage) {
     const T = S.team, u = S.boot.user;
     if (!T.canEdit || T.team.status === 'Archived') return false;
@@ -576,7 +578,6 @@
     if (stage.gate && S.boot.settings.enforceGates && T.gates[stage.gate] !== 'Cleared') return false;
     return true;
   }
-
   function drawStage(main, stage) {
     if (!stage) { main.appendChild(el('div', { class: 'card card-b muted' }, 'No stages are enabled.')); return; }
     const rv = S.boot.reviews.filter(r => r.id === stage.review)[0];
@@ -598,7 +599,6 @@
     if (S.boot.user.role === 'student') main.appendChild(el('div', { class: 'alert', style: { marginBottom: '18px' } }, icon('edit'), el('div', null, el('b', null, 'Type it yourself: '), 'pasting is disabled in worksheets. Write every answer in your own words — reviewers check that each member understands the work.')));
     (stage.sections || []).forEach(sec => main.appendChild(drawSection(stage, sec)));
   }
-
   /* ---------- Section rendering ---------- */
   function recKey(sec, owner) { return sec.individual ? sec.id + '|' + owner : sec.id; }
   function ownerFor(sec) {
@@ -608,7 +608,6 @@
     return S.viewOwner[sec.id] || ((S.team.members.filter(m => m.email)[0] || {}).email || '');
   }
   function minRows(sec) { const th = theme(S.team.team.themeId); return sec.minRows === 'theme:minFR' ? (th ? th.minFR : 5) : Number(sec.minRows || 0); }
-
   function initialRows(sec) {
     const th = theme(S.team.team.themeId) || {};
     const first = (sec.columns[0] || {}).id;
@@ -624,7 +623,6 @@
     while (rows.length < need) rows.push({});
     return rows;
   }
-
   function drawSection(stage, sec) {
     const T = S.team, u = S.boot.user;
     const card = el('section', { class: 'card sec', id: 'sec-' + sec.id });
@@ -635,10 +633,8 @@
     const body = el('div', { class: 'card-b' });
     card.appendChild(body);
     if (sec.desc) body.appendChild(el('p', { class: 'small muted' }, sec.desc));
-
     if (sec.type === 'info') { body.appendChild(renderInfo(sec.info)); return card; }
     if (sec.type === 'evidence') { body.appendChild(renderEvidence(stage, sec, canEditStage(stage))); card.appendChild(renderComments(stage, sec)); return card; }
-
     // Individual sections: faculty/admin choose which member to view
     if (sec.individual && u.role !== 'student') {
       const s = select(T.members.filter(m => m.email).map(m => ({ v: m.email, l: m.name + (m.usn ? ' (' + m.usn + ')' : '') })), ownerFor(sec));
@@ -653,10 +649,8 @@
     const editable = canEditStage(stage) && (!sec.individual || u.role === 'student' || u.role === 'admin');
     const draft = rec && rec.data ? JSON.parse(JSON.stringify(rec.data)) : (sec.type === 'table' ? { rows: initialRows(sec) } : { values: {} });
     const markDirty = () => { S.dirty[key] = true; status.textContent = 'Unsaved changes'; status.className = 'small'; status.style.color = 'var(--warn)'; };
-
     if (sec.type === 'table') body.appendChild(renderTable(sec, draft, editable, locked, markDirty));
     else body.appendChild(renderFields(sec, draft, editable, locked, markDirty));
-
     // Footer: status, save, sign-off
     const status = el('span', { class: 'small muted' }, rec ? ('Saved v' + rec.version + ' · ' + fmt(rec.updatedAt) + ' · first recorded ' + fmt(rec.createdAt, false)) : 'Not saved yet');
     const foot = el('div', { class: 'sec-foot' }, status, el('div', { class: 'spacer', style: { flex: 1 } }));
@@ -686,14 +680,12 @@
     card.appendChild(renderComments(stage, sec));
     return card;
   }
-
   async function refreshProgress() {
     try { const t = await call('getTeam', { teamId: S.teamId }); S.team.progress = t.progress; S.team.debugCycles = t.debugCycles; S.team.flags = t.flags;
       document.querySelectorAll('.stage-btn').forEach((b, i) => { const s = stageList()[i]; if (!s) return; const p = (t.progress[s.id] || {}).pct || 0; const m = b.querySelector('.stage-meta'); if (m) { const bi = m.querySelector('.progress > i'); if (bi) bi.style.width = p + '%'; const sp = m.querySelector('span'); if (sp) sp.textContent = p + '%'; } });
       const r = contentEl.querySelector('.ring'); if (r) { r.style.setProperty('--p', overallPct()); r.querySelector('span').textContent = Math.round(overallPct()) + '%'; }
     } catch (e) { /* non-critical */ }
   }
-
   function renderLock(stage, sec, rec, editable) {
     const T = S.team, u = S.boot.user;
     const wrap = el('div', { class: 'row' });
@@ -726,7 +718,6 @@
     }
     return wrap;
   }
-
   function cellInput(col, value, disabled, onChange) {
     let i;
     if (col.type === 'select') i = select(col.options || [''], value, { disabled: disabled });
@@ -737,7 +728,6 @@
     i.setAttribute('aria-label', col.label);
     return i;
   }
-
   function renderTable(sec, draft, editable, locked, markDirty) {
     const wrap = el('div');
     const cols = sec.columns;
@@ -767,7 +757,6 @@
     draw();
     return wrap;
   }
-
   function renderFields(sec, draft, editable, locked, markDirty) {
     const wrap = el('div');
     draft.values = draft.values || {};
@@ -784,7 +773,6 @@
     function sentences(t) { const n = String(t || '').split(/[.!?]+(\s|$)/).filter(s => s && s.trim().length > 3).length; return n + ' sentence' + (n === 1 ? '' : 's'); }
     return wrap;
   }
-
   /* ---------- Info blocks from the handbook ---------- */
   function renderInfo(key) {
     const th = theme(S.team.team.themeId);
@@ -818,7 +806,6 @@
     } else add(box, el('span', { class: 'muted' }, 'Reference'));
     return box;
   }
-
   /* ---------- Evidence ---------- */
   function renderEvidence(stage, sec, editable) {
     const T = S.team, u = S.boot.user;
@@ -876,7 +863,6 @@
     }
     return wrap;
   }
-
   /* ---------- Comments ---------- */
   function renderComments(stage, sec) {
     const T = S.team;
@@ -908,17 +894,15 @@
     draw();
     return box;
   }
-
   /* ==========================================================================
    * 9. Reviews & assessment
    * ======================================================================== */
   function drawReviews(pane) {
     const T = S.team, u = S.boot.user, th = theme(T.team.themeId) || { map: {} };
-    const canReview = u.role === 'faculty' || isStaff();
+    const canReview = (u.role === 'faculty' || isStaff()) && u.roleLabel !== 'Reviewer';
     const showMarks = u.role !== 'student' || S.boot.settings.showMarksToStudents;
     const byId = {}; T.reviews.forEach(r => byId[r.reviewId] = r);
     if (!canReview) pane.appendChild(feedbackSummary(byId));
-
     if (showMarks) {
       const fin = byId.FINAL || {};
       const tbody = el('tbody');
@@ -933,7 +917,6 @@
         el('div', { class: 'tbl-wrap', style: { border: 0 } }, el('table', { class: 't' }, el('thead', null, el('tr', null, el('th', null, 'Student'), S.boot.reviews.map(r => el('th', null, (r.id === 'FINAL' ? 'Final' : r.id) + ' /' + r.marks)), el('th', null, 'Viva /10'), el('th', null, 'Artefact /5'), el('th', null, 'Total'))), tbody)),
         el('div', { class: 'card-b small muted' }, 'Calibration reminder: a team with an impressive artefact whose members cannot independently answer the Five Lenses should not score above 50 / 100.')));
     }
-
     S.boot.reviews.forEach(rv => {
       const r = byId[rv.id] || { gate: {}, bands: {}, extra: {} };
       const auto = autoChecks(rv);
@@ -943,11 +926,9 @@
       card.appendChild(b);
       b.appendChild(el('p', { class: 'small muted' }, rv.protects));
       b.appendChild(el('div', { class: 'row', style: { marginBottom: '12px' } }, auto.map(a => el('span', { class: 'badge ' + (a.ok ? 'ok' : 'warn') }, (a.ok ? '✓ ' : '• ') + a.label))));
-
       const gateInputs = rv.gate.map((g, i) => el('input', { type: 'checkbox', checked: !!(r.gate || {})[i], disabled: !canReview }));
       b.appendChild(el('h4', null, 'Gate criteria (Handbook 7.2)'));
       b.appendChild(el('div', { style: { margin: '6px 0 14px' } }, rv.gate.map((g, i) => el('label', { class: 'check' }, gateInputs[i], el('span', null, g)))));
-
       const bandSel = {};
       if (true) {
         b.appendChild(el('h4', null, canReview ? 'Rubric components (Handbook 5.3)' : 'Rubric grades given by your reviewer'));
@@ -968,7 +949,6 @@
         suggest.textContent = den ? 'Suggested from bands: ' + (Math.round(num / den * rv.marks * 2) / 2) + ' / ' + rv.marks : '';
       };
       Object.values(bandSel).forEach(s => s.addEventListener('change', calc)); calc();
-
       const lens = el('textarea', { value: r.lensNotes || '', disabled: !canReview, rows: 3, placeholder: 'Notes against the Five Lenses: FR · SFD & course · driving calculation · predicted vs measured · failure & root cause' });
       const marks = el('input', { type: 'number', min: 0, max: rv.marks, step: 0.5, value: r.marks === '' || r.marks === undefined ? '' : r.marks, disabled: !canReview });
       const decision = select(['', 'In progress', 'Cleared', 'Not cleared'], r.decision, { disabled: !canReview });
@@ -1015,7 +995,6 @@
       }
       pane.appendChild(card);
     });
-
     const ai = T.aiScores || {};
     const aiRows = stageList().filter(st => ai[st.id]).map(st => el('tr', null, el('td', null, el('span', { class: 'badge brand mono' }, st.code), ' ', st.title), el('td', null, scoreBadge(ai[st.id].score)), el('td', { class: 'tiny muted' }, fmt(ai[st.id].at))));
     pane.appendChild(el('div', { class: 'card', style: { marginBottom: '18px' } }, el('div', { class: 'card-h' }, icon('bot'), el('h3', { style: { flex: 1 } }, 'AI Mentor handbook scores (latest per stage)')),
@@ -1024,7 +1003,6 @@
     pane.appendChild(el('div', { class: 'card' }, el('div', { class: 'card-h' }, el('h3', null, "The Reviewer's Five Lenses (Handbook 7.3)")),
       el('div', { class: 'card-b' }, S.boot.lenses.map(l => el('div', { style: { marginBottom: '10px' } }, el('b', null, l.n + '. ' + l.name), el('div', { class: 'small' }, l.q))))));
   }
-
   function feedbackSummary(byId) {
     const got = S.boot.reviews.filter(rv => byId[rv.id] && (byId[rv.id].comment || byId[rv.id].decision || byId[rv.id].lensNotes));
     const card = el('div', { class: 'card', style: { marginBottom: '18px' } }, el('div', { class: 'card-h' }, icon('msg'), el('h3', { style: { flex: 1 } }, 'Feedback from your reviewers'), el('span', { class: 'badge brand' }, got.length + ' review(s)')));
@@ -1039,7 +1017,6 @@
     });
     return card;
   }
-
   function autoChecks(rv) {
     const T = S.team, out = [];
     rv.stages.forEach(id => { const s = S.boot.stages.filter(x => x.id === id)[0]; if (!s) return; const p = (T.progress[id] || {}).pct || 0; out.push({ ok: p >= 100, label: s.code + ' ' + p + '% complete' }); });
@@ -1050,7 +1027,6 @@
     T.flags.forEach(f => out.push({ ok: false, label: f }));
     return out;
   }
-
   /* ==========================================================================
    * 10. AI Mentor
    * ======================================================================== */
@@ -1061,7 +1037,13 @@
     const stages = stageList();
     const stageSel = select(stages.map(s => ({ v: s.id, l: s.code + ' — ' + s.title })), S.stageId || (stages[0] || {}).id);
     const modeOpts = (isStudent ? [{ v: 'quiz', l: 'Timed quiz on my saved work — 45 s per question, score /10' }, { v: 'mentor', l: 'Ask the mentor a question' }] : [{ v: 'mentor', l: 'Ask the mentor a question' }])
-      .concat([{ v: 'review', l: 'Score my saved work /10 (handbook rubric)' }, { v: 'viva', l: 'Mock viva — Five Lenses' }]);
+      .concat([
+        { v: 'reasoning', l: 'Technical Reasoning' },
+        { v: 'foundation', l: 'Foundation Connection' },
+        { v: 'prep', l: 'Review Preparation' },
+        { v: 'reflection', l: 'Individual Reflections' },
+        { v: 'review', l: 'Score my saved work /10 (handbook rubric)' },
+        { v: 'viva', l: 'Mock viva — Five Lenses' }]);
     const modeSel = select(modeOpts, isStudent ? 'quiz' : 'review');
     const filter = u.role !== 'student' ? select([{ v: '', l: 'All stages' }].concat(stages.map(s => ({ v: s.id, l: s.code }))), '') : null;
     const log = el('div', { class: 'chat-log', 'aria-live': 'polite' });
@@ -1069,7 +1051,6 @@
     const send = el('button', { class: 'btn primary', disabled: !canChat }, icon('send'), el('span', { class: 'hide-sm' }, 'Send'));
     const usage = el('span', { class: 'tiny muted' });
     const stageCode = () => (stages.filter(s => s.id === stageSel.value)[0] || {}).code || '';
-
     const msgEl = m => {
       const isUser = m.role === 'user';
       const node = el('div', { class: 'msg ' + (isUser ? 'user' : 'model') },
@@ -1103,11 +1084,10 @@
     };
     const pushLog = arr => { (arr || []).forEach(x => S.mentor && S.mentor.push(x)); drawLog(); };
     const setScore = (stageId, score) => { S.team.aiScores = S.team.aiScores || {}; S.team.aiScores[stageId] = { score: Number(score), at: new Date().toISOString() }; };
-
     /* ---------- free chat / scoring / viva ---------- */
     const doSend = async () => {
       const text = input.value.trim();
-      if (!S.mentor || (!text && modeSel.value === 'mentor')) return;
+      if (!S.mentor || (!text && ['review', 'viva'].indexOf(modeSel.value) < 0)) return;
       const msg = text || (modeSel.value === 'review' ? 'Please score our saved records for this stage against the handbook.' : 'Start my mock viva.');
       input.value = ''; busy(send, true, '…');
       S.mentor.push({ role: 'user', userName: u.name, text: msg, stageId: stageSel.value, createdAt: new Date().toISOString() }); drawLog();
@@ -1124,7 +1104,6 @@
     send.onclick = doSend;
     input.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); doSend(); } });
     const chatIn = el('div', { class: 'chat-in' }, input, send);
-
     /* ---------- timed interactive quiz ---------- */
     const quizBox = el('div', { class: 'quiz-box' });
     let QZ = null, timer = null;
@@ -1211,7 +1190,6 @@
       }
       clear(quizBox).appendChild(body);
     };
-
     // switch to 'Ask the mentor' with the quiz question as context (student still types the question)
     const askAbout = r => {
       const q = (S.mentor || []).filter(m => m.mode === 'quiz' && m.role === 'model' && /^\*\*Question/.test(m.text || '')).pop();
@@ -1230,7 +1208,6 @@
     modeSel.addEventListener('change', applyMode);
     stageSel.addEventListener('change', () => { if (modeSel.value === 'quiz' && !QZ) quizIdle(); });
     if (filter) filter.onchange = drawLog;
-
     pane.appendChild(el('div', { class: 'card' },
       el('div', { class: 'card-h' }, el('div', { class: 'row', style: { flex: 1 } }, el('span', { class: 'ic avatar' }, icon('bot')), el('div', null, el('h3', null, 'AI Mentor'), el('div', { class: 'tiny muted' }, 'Gemini · team-wise history · reviewed by faculty'))),
         canChat ? el('div', { style: { minWidth: '220px', flex: '1 1 220px' } }, stageSel) : null, canChat ? el('div', { style: { minWidth: '220px', flex: '1 1 220px' } }, modeSel) : null,
@@ -1240,11 +1217,9 @@
       el('div', { class: 'chat' }, log, canChat ? quizBox : null, canChat ? chatIn : el('div', { class: 'chat-in small muted' }, 'Read-only review of the team’s AI Mentor interactions, including every quiz question, answer, time taken and mark. Add notes on replies to guide the team.')),
       canChat ? el('div', { class: 'card-b', style: { paddingTop: '6px', paddingBottom: '10px' } }, usage) : null));
     if (canChat) applyMode();
-
     if (S.mentor && S.mentor._team === T.team.id) drawLog();
     else { log.appendChild(loader('Loading conversation…')); call('mentorHistory', { teamId: T.team.id }).then(h => { S.mentor = h; S.mentor._team = T.team.id; drawLog(); }).catch(e => { clear(log).appendChild(el('div', { class: 'alert bad' }, e.message)); }); }
   }
-
   function myKeyPanel() {
     const box = el('div', { class: 'card-b', style: { borderBottom: '1px solid var(--line)' } });
     const draw = st => {
@@ -1274,7 +1249,6 @@
     call('myKeyStatus').then(draw).catch(() => draw({ hasKey: false }));
     return box;
   }
-
   /* ==========================================================================
    * 11. Team info & evidence index
    * ======================================================================== */
@@ -1290,7 +1264,6 @@
           el('tbody', null, T.evidence.slice().reverse().map(e => el('tr', null, el('td', null, el('span', { class: 'badge brand mono' }, (S.boot.stages.filter(s => s.id === e.stageId)[0] || {}).code || e.stageId)),
             el('td', null, el('a', { href: e.url, target: '_blank', rel: 'noopener noreferrer' }, e.name), e.caption ? el('div', { class: 'tiny muted' }, e.caption) : null), el('td', { class: 'tiny' }, fmt(e.uploadedAt))))))) : el('p', { class: 'muted' }, 'No evidence yet.')))));
   }
-
   /* ==========================================================================
    * 12. Administration
    * ======================================================================== */
@@ -1301,27 +1274,25 @@
     drawAdmin();
   }
   function drawAdmin() {
-    const tabs = [['faculty', 'Faculty'], ['students', 'Students'], ['teams', 'Teams'], ['gemini', 'Gemini AI'], ['settings', 'Settings'], ['audit', 'Audit log']]
-      .filter(t => S.boot.user.role === 'admin' || (t[0] !== 'gemini' && t[0] !== 'settings'));
+    const tabs = [['faculty', 'Faculty'], ['students', 'Students'], ['teams', 'Teams'], ['announce', 'Announcements'], ['questions', 'AI Questions'], ['gemini', 'Gemini AI'], ['settings', 'Settings'], ['audit', 'Audit log']]
+      .filter(t => S.boot.user.role === 'admin' || (t[0] !== 'gemini' && t[0] !== 'settings' && t[0] !== 'questions'));
     if (!tabs.some(t => t[0] === S.adminTab)) S.adminTab = 'faculty';
     const c = clear(contentEl);
     c.appendChild(el('div', { class: 'row between', style: { marginBottom: '12px' } }, el('div', null, el('h1', null, 'Administration'), el('div', { class: 'small muted' }, S.boot.dept.name + ' · all changes are saved to the backend automatically — no manual sheet edits needed.')),
       el('button', { class: 'btn primary', onclick: () => reminderModal() }, icon('send'), 'Send reminder')));
     c.appendChild(el('div', { class: 'tabs' }, tabs.map(t => el('button', { class: S.adminTab === t[0] ? 'active' : '', onclick: () => { S.adminTab = t[0]; drawAdmin(); } }, t[1]))));
     const pane = el('div'); c.appendChild(pane);
-    ({ faculty: admFaculty, students: admStudents, teams: admTeams, gemini: admGemini, settings: admSettings, audit: admAudit })[S.adminTab](pane);
+    ({ faculty: admFaculty, students: admStudents, teams: admTeams, announce: admAnnounce, questions: admQuestions, gemini: admGemini, settings: admSettings, audit: admAudit })[S.adminTab](pane);
   }
   const A = () => S.admin;
   const facName = id => (A().faculty.filter(f => f.id === id)[0] || {}).name || '';
   const teamName = id => (A().teams.filter(t => t.id === id)[0] || {}).name || '';
   const isTrue = v => v === true || String(v) === 'true';
-
   function tableCard(title, actions, headers, rows, emptyText) {
     return el('div', { class: 'card' }, el('div', { class: 'card-h' }, el('h3', { style: { flex: 1 } }, title), actions),
       el('div', { class: 'tbl-wrap', style: { border: 0, borderRadius: 0 } }, el('table', { class: 't' }, el('thead', null, el('tr', null, headers.map(h => el('th', null, h)))),
         el('tbody', null, rows.length ? rows : el('tr', null, el('td', { colspan: headers.length, class: 'muted', style: { textAlign: 'center', padding: '24px' } }, emptyText || 'Nothing here yet.'))))));
   }
-
   /* ----- Faculty ----- */
   function admFaculty(pane) {
     const q = el('input', { type: 'text', placeholder: 'Search…', style: { maxWidth: '220px' } });
@@ -1356,7 +1327,6 @@
           modal({ title: 'Import result', body: el('div', null, el('p', null, el('b', null, r.added), ' added.'), r.skipped.length ? el('div', { class: 'alert warn' }, el('div', null, el('b', null, r.skipped.length + ' skipped:'), r.skipped.map(s => el('div', { class: 'small' }, s)))) : null), actions: [{ label: 'OK', cls: 'primary', fn: c2 => c2() }] });
         } catch (e) { toast(e.message, 'bad'); } } }] });
   }
-
   /* ----- Students ----- */
   function admStudents(pane) {
     const q = el('input', { type: 'text', placeholder: 'Search SRN, name, email…', style: { maxWidth: '240px' } });
@@ -1395,7 +1365,6 @@
     modal({ title: x.id ? 'Edit student' : 'Add student', body: el('div', null, el('div', { class: 'grid g2' }, field('SRN', i.usn), field('Full name', i.name), field('Email (Google account)', i.email, 'Optional — needed only to sign in.'), field('Team', i.team)), el('label', { class: 'check' }, i.active, 'Active')),
       actions: [{ label: 'Cancel', fn: c => c() }, { label: 'Save', cls: 'primary', fn: async c => { try { A().students = await call('saveStudent', { id: x.id, usn: i.usn.value, name: i.name.value, email: i.email.value, teamId: i.team.value, active: i.active.checked }); c(); drawAdmin(); toast('Saved.', 'ok'); } catch (e) { toast(e.message, 'bad'); } } }] });
   }
-
   /* ----- Teams ----- */
   function admTeams(pane) {
     const rows = A().teams.map(t => {
@@ -1443,7 +1412,6 @@
           S.admin = await call('adminData'); c(); drawAdmin(); toast('Team saved. Drive evidence folder is ready.', 'ok');
         } catch (e) { toast(e.message, 'bad'); } } }] });
   }
-
   /* ----- Reminders (email to team members) ----- */
   function reminderModal(preselect) {
     const teams = A().teams.filter(t => t.status !== 'Archived').sort((a, b) => String(a.name).localeCompare(String(b.name), undefined, { numeric: true }));
@@ -1486,7 +1454,6 @@
         } catch (e) { toast(e.message, 'bad'); }
       } }] });
   }
-
   /* ----- Gemini ----- */
   function admGemini(pane) {
     const keys = A().keys, st = A().settings;
@@ -1501,7 +1468,6 @@
         el('button', { class: 'btn sm', onclick: () => editKey(k) }, icon('edit'), 'Edit'),
         !k.env ? el('button', { class: 'btn sm danger', 'aria-label': 'Delete key', onclick: async () => { if (!(await confirmBox('Delete key', 'Delete "' + k.label + '"? Teams using it fall back to the default key.', 'Delete', true))) return; try { A().keys = await call('deleteKey', { id: k.id }); S.admin = await call('adminData'); drawAdmin(); } catch (e) { toast(e.message, 'bad'); } } }, icon('trash')) : null))));
     pane.appendChild(tableCard('Gemini API keys', el('button', { class: 'btn primary', onclick: () => editKey({}) }, icon('plus'), 'Add key'), ['Label', 'Key', 'Model', 'Last test', ''], rows, 'No keys yet. Set GEMINI_API_KEY in Script properties, or add a key here.'));
-
     // Defaults
     const defKey = select([{ v: '', l: env ? 'Environment key (fallback)' : '— none —' }].concat(keys.filter(k => !k.env).map(k => ({ v: k.id, l: k.label }))), st.defaultKeyId || '');
     const defModel = el('input', { type: 'text', value: st.defaultModel, list: 'models-dl' });
@@ -1514,7 +1480,6 @@
     loadModels.onclick = async () => { const k = keys[0]; if (!k) { toast('Add a key first.', 'bad'); return; } busy(loadModels, true, 'Loading…'); try { const ms = await call('listModels', { id: defKey.value || k.id }); clear(dl); ms.forEach(m => dl.appendChild(el('option', { value: m.id }, m.label))); toast(ms.length + ' models available — pick from the model field.', 'ok'); } catch (e) { toast(e.message, 'bad'); } busy(loadModels, false); };
     pane.appendChild(el('div', { class: 'card', style: { marginTop: '18px' } }, el('div', { class: 'card-h' }, el('h3', { style: { flex: 1 } }, 'Mentor defaults'), loadModels),
       el('div', { class: 'card-b' }, dl, el('div', { class: 'grid g4' }, field('Default key', defKey), field('Default model', defModel), field('Daily messages per team', limit), field('Temperature', temp, 'Lower = more focused')), saveD)));
-
     // Team assignment
     const assign = A().teams.filter(t => t.status !== 'Archived').map(t => ({ t: t, k: select([{ v: '', l: 'Default' }].concat(keys.map(k => ({ v: k.id, l: k.label }))), t.apiKeyId || ''), m: el('input', { type: 'text', value: t.model || '', placeholder: 'inherit', list: 'models-dl' }) }));
     const saveA = el('button', { class: 'btn primary' }, icon('check'), 'Save assignments');
@@ -1531,20 +1496,86 @@
         try { if (k.id) await call('updateKey', { id: k.id, label: label.value, model: model.value, key: key.value }); else await call('addKey', { label: label.value, key: key.value, model: model.value });
           key.value = ''; S.admin = await call('adminData'); c(); drawAdmin(); toast('Key saved.', 'ok'); } catch (e) { toast(e.message, 'bad'); } } }] });
   }
-
   async function reloadBoot() { const b = await call('bootstrap'); S.boot.stages = b.stages; S.boot.settings = b.settings; }
-
   /* ----- Settings ----- */
+  function admAnnounce(pane) {
+    const title = el('input', { type: 'text', placeholder: 'e.g. Review 2 moved to Friday' });
+    const msg = el('textarea', { rows: 4, placeholder: 'Write your announcement. Students and/or staff will see it in the portfolio, and by email if you tick the box.' });
+    const aud = select([{ v: 'all', l: 'Everyone (students + staff)' }, { v: 'students', l: 'Students only' }, { v: 'staff', l: 'Staff only' }], 'all');
+    const email = el('input', { type: 'checkbox', checked: true });
+    const post = el('button', { class: 'btn primary' }, icon('send'), 'Post announcement');
+    const listWrap = el('div');
+    const drawList = async () => {
+      try { const list = await call('announcements'); S.boot.announcements = list;
+        clear(listWrap).appendChild(list.length ? el('div', { class: 'stack' }, list.map(a => el('div', { class: 'card' }, el('div', { class: 'card-b row between' },
+          el('div', null, el('div', { class: 'row' }, el('b', null, a.title), el('span', { class: 'badge ' + (a.audience === 'staff' ? 'warn' : a.audience === 'students' ? 'brand' : '') }, a.audience)), el('div', { class: 'small muted' }, (a.createdBy || 'HoD Office') + ' · ' + fmt(a.createdAt) + (a.emailed ? ' · emailed ' + a.emailed : '')), el('div', { class: 'small', style: { marginTop: '4px', whiteSpace: 'pre-wrap' } }, a.message)),
+          el('button', { class: 'btn danger sm', onclick: async () => { if (!(await confirmBox('Delete announcement', 'Remove this announcement for everyone?', 'Delete', true))) return; try { await call('deleteAnnouncement', { id: a.id }); drawList(); } catch (e) { toast(e.message, 'bad'); } } }, icon('trash')))))) : el('p', { class: 'muted' }, 'No announcements yet.'));
+      } catch (e) { clear(listWrap).appendChild(el('div', { class: 'alert bad' }, e.message)); }
+    };
+    post.onclick = async () => {
+      if (!title.value.trim() || !msg.value.trim()) { toast('Write a title and a message.', 'bad'); return; }
+      if (email.checked && !(await confirmBox('Email this announcement?', 'An email will be sent to ' + (aud.value === 'staff' ? 'all staff' : aud.value === 'students' ? 'all students' : 'all students and staff') + ' who have an email address. Continue?', 'Post & email'))) return;
+      busy(post, true, 'Posting…');
+      try { const r = await call('saveAnnouncement', { title: title.value, message: msg.value, audience: aud.value, email: email.checked });
+        title.value = ''; msg.value = ''; toast('Posted' + (r.emailed ? ' and emailed to ' + r.emailed + ' people' : '') + '.', 'ok'); drawList();
+      } catch (e) { toast(e.message, 'bad'); } busy(post, false);
+    };
+    pane.appendChild(el('div', { class: 'card', style: { marginBottom: '16px' } }, el('div', { class: 'card-h' }, icon('bell'), el('h3', null, 'New announcement')),
+      el('div', { class: 'card-b' }, field('Title', title), field('Message', msg), el('div', { class: 'grid g2' }, field('Who sees it', aud), el('label', { class: 'check', style: { marginTop: '24px' } }, email, el('span', null, el('b', null, 'Also send by email'), el('div', { class: 'small muted' }, 'Reaches every student / staff with an email on file (sent as BCC — nobody sees the list).')))),
+        el('div', { style: { marginTop: '10px' } }, post))));
+    pane.appendChild(el('div', { class: 'card' }, el('div', { class: 'card-h' }, el('h3', null, 'Posted announcements')), el('div', { class: 'card-b' }, listWrap)));
+    drawList();
+  }
+
+  function admQuestions(pane) {
+    const info = el('div', { class: 'card', style: { marginBottom: '16px' } });
+    const bankWrap = el('div');
+    const load = async () => {
+      clear(info).appendChild(el('div', { class: 'card-b' }, loader('Reading the books folder…')));
+      try {
+        const d = await call('booksList');
+        const books = el('div', { class: 'stack' }, d.books.map(bk => {
+          const nIn = el('input', { type: 'number', min: 5, max: 25, value: 15, style: { width: '70px' } });
+          const btn = el('button', { class: 'btn primary sm', disabled: bk.tooBig }, icon('bot'), bk.count ? 'Add more' : 'Build questions');
+          btn.onclick = async () => { busy(btn, true, 'Reading book & writing questions… (up to a minute)'); try { const r = await call('buildQuestions', { fileId: bk.id, count: nIn.value }); toast('Added ' + r.added + ' questions from ' + r.book + '.', 'ok'); load(); drawBank(); } catch (e) { toast(e.message, 'bad'); busy(btn, false); } };
+          return el('div', { class: 'row between', style: { padding: '8px 0', borderBottom: '1px solid var(--line)' } },
+            el('div', { style: { minWidth: 0 } }, el('b', null, bk.short), el('div', { class: 'tiny muted' }, bk.sizeMB + ' MB · ' + bk.count + ' questions in bank' + (bk.error ? ' · last error: ' + bk.error : bk.lastRun ? ' · built ' + fmt(bk.lastRun) : '')), bk.tooBig ? el('div', { class: 'tiny', style: { color: 'var(--bad)' } }, 'Too big to send — split into chapter PDFs') : null),
+            el('div', { class: 'row', style: { flexWrap: 'nowrap' } }, nIn, btn));
+        }));
+        clear(info).appendChild(el('div', null, el('div', { class: 'card-h' }, icon('book'), el('h3', { style: { flex: 1 } }, 'Core textbooks'), el('a', { class: 'small', href: d.folderUrl, target: '_blank', rel: 'noopener noreferrer' }, 'Open folder'), el('button', { class: 'btn ghost sm', onclick: load }, icon('refresh'))),
+          el('div', { class: 'card-b' }, el('p', { class: 'small muted' }, 'The AI reads each textbook once and writes quiz questions with model answers into the bank. Students then get ' + d.quizQuestions + ' random questions (' + d.quizSeconds + ' s each) from the bank. ', el('b', null, 'Total in bank: ' + d.total + ' questions')),
+            books.children.length ? books : el('p', { class: 'muted' }, 'No PDF books found in the folder.'))));
+      } catch (e) { clear(info).appendChild(el('div', { class: 'card-b' }, el('div', { class: 'alert bad' }, icon('alert'), e.message))); }
+    };
+    const drawBank = async () => {
+      clear(bankWrap).appendChild(loader('Loading question bank…'));
+      try {
+        const rows = await call('bankList', {});
+        clear(bankWrap).appendChild(tableCard('Question bank (' + rows.length + ')', rows.length ? el('button', { class: 'btn danger sm', onclick: async () => { if (!(await confirmBox('Clear the whole bank', 'Delete ALL ' + rows.length + ' questions? You can rebuild them from the books.', 'Delete all', true))) return; try { await call('clearBank', {}); load(); drawBank(); } catch (e) { toast(e.message, 'bad'); } } }, icon('trash'), 'Clear all') : null,
+          ['Book', 'Topic', 'Themes', 'Question', 'Model answer', ''],
+          rows.map(q => el('tr', { style: q.active ? null : { opacity: 0.5 } },
+            el('td', { class: 'small' }, q.book), el('td', { class: 'small' }, q.topic), el('td', null, el('span', { class: 'badge' }, q.themes)),
+            el('td', { class: 'small', style: { maxWidth: '320px' } }, q.question), el('td', { class: 'small muted', style: { maxWidth: '300px' } }, q.answer),
+            el('td', null, el('div', { class: 'row', style: { flexWrap: 'nowrap' } },
+              el('button', { class: 'btn ghost sm', title: q.active ? 'Hide from quizzes' : 'Use in quizzes', onclick: async () => { try { await call('setQuestion', { id: q.id, active: !q.active }); drawBank(); } catch (e) { toast(e.message, 'bad'); } } }, q.active ? icon('check') : icon('x')),
+              el('button', { class: 'btn ghost sm', title: 'Delete', onclick: async () => { try { await call('setQuestion', { id: q.id, remove: true }); drawBank(); load(); } catch (e) { toast(e.message, 'bad'); } } }, icon('trash')))))),
+          'No questions yet. Build them from the books above.'));
+      } catch (e) { clear(bankWrap).appendChild(el('div', { class: 'alert bad' }, e.message)); }
+    };
+    pane.appendChild(info); pane.appendChild(bankWrap); load(); drawBank();
+  }
+
   function admSettings(pane) {
     const st = A().settings;
-    const i = { gates: el('input', { type: 'checkbox', checked: st.enforceGates }), marks: el('input', { type: 'checkbox', checked: st.showMarksToStudents }), otp: el('input', { type: 'checkbox', checked: st.allowOtpLogin }) };
+    const i = { gates: el('input', { type: 'checkbox', checked: st.enforceGates }), marks: el('input', { type: 'checkbox', checked: st.showMarksToStudents }), otp: el('input', { type: 'checkbox', checked: st.allowOtpLogin }), qs: el('input', { type: 'number', min: 15, max: 300, value: st.quizSeconds || 45, style: { width: '80px' } }), qn: el('input', { type: 'number', min: 3, max: 10, value: st.quizQuestions || 5, style: { width: '80px' } }) };
     const save = el('button', { class: 'btn primary' }, icon('check'), 'Save settings');
-    save.onclick = async () => { busy(save, true, 'Saving…'); try { A().settings = await call('saveSettings', { enforceGates: i.gates.checked, showMarksToStudents: i.marks.checked, allowOtpLogin: i.otp.checked }); await reloadBoot(); toast('Saved.', 'ok'); } catch (e) { toast(e.message, 'bad'); } busy(save, false); };
+    save.onclick = async () => { busy(save, true, 'Saving…'); try { A().settings = await call('saveSettings', { enforceGates: i.gates.checked, showMarksToStudents: i.marks.checked, allowOtpLogin: i.otp.checked, quizSeconds: i.qs.value, quizQuestions: i.qn.value }); await reloadBoot(); toast('Saved.', 'ok'); } catch (e) { toast(e.message, 'bad'); } busy(save, false); };
     pane.appendChild(el('div', { class: 'grid g2' },
       el('div', { class: 'card' }, el('div', { class: 'card-h' }, el('h3', null, 'Portfolio rules')), el('div', { class: 'card-b' },
         el('label', { class: 'check' }, i.gates, el('span', null, el('b', null, 'Enforce review hard gates'), el('div', { class: 'small muted' }, 'Handbook 7.2: S6 and S7 stay locked for students until Review 3 is cleared.'))),
         el('label', { class: 'check' }, i.marks, el('span', null, el('b', null, 'Show marks to students'), el('div', { class: 'small muted' }, 'Decisions and feedback are always visible; marks only when enabled.'))),
         el('label', { class: 'check' }, i.otp, el('span', null, el('b', null, 'Allow email-code sign-in'), el('div', { class: 'small muted' }, 'Fallback for users whose Google identity is not shared with the app (e.g. personal Gmail).'))),
+        el('div', { style: { marginTop: '8px', paddingTop: '8px', borderTop: '1px solid var(--line)' } }, el('h4', null, 'AI quiz'), el('div', { class: 'grid g2', style: { marginTop: '6px' } }, field('Seconds per question', i.qs, 'How long each student gets to answer (15–300).'), field('Questions per quiz', i.qn, 'How many questions each quiz has (3–10).'))),
         el('div', { style: { marginTop: '12px' } }, save))),
       el('div', { class: 'card' }, el('div', { class: 'card-h' }, el('h3', null, 'Department & backend')), el('div', { class: 'card-b' },
         el('p', null, el('b', null, 'Department: '), S.boot.dept.name, el('span', { class: 'badge', style: { marginLeft: '6px' } }, 'fixed in code')),
@@ -1553,7 +1584,6 @@
         el('p', null, el('a', { href: A().links.spreadsheet, target: '_blank', rel: 'noopener noreferrer' }, icon('file'), ' Backend spreadsheet (read-only reference)')),
         el('p', null, el('a', { href: A().links.folder, target: '_blank', rel: 'noopener noreferrer' }, icon('folder'), ' Portfolio Drive folder'))))));
   }
-
   /* ----- Audit ----- */
   async function admAudit(pane) {
     pane.appendChild(loader('Loading audit log…'));
@@ -1563,7 +1593,6 @@
         rows.map(r => el('tr', null, el('td', { class: 'tiny' }, fmt(r.at)), el('td', { class: 'small' }, r.email), el('td', null, el('span', { class: 'badge' }, r.role)), el('td', { class: 'mono' }, r.action), el('td', { class: 'small' }, teamName(r.teamId)), el('td', { class: 'small', style: { maxWidth: '420px', wordBreak: 'break-word' } }, r.detail)))));
     } catch (e) { clear(pane).appendChild(el('div', { class: 'alert bad' }, e.message)); }
   }
-
   /* ==========================================================================
    * 13. Handbook reference
    * ======================================================================== */
@@ -1593,7 +1622,6 @@
         el('div', { style: { marginTop: '14px' } }, B.lenses.map(l => el('div', { class: 'small', style: { marginBottom: '6px' } }, el('b', null, l.n + '. ' + l.name + ' — '), l.q)))))));
     c.appendChild(el('div', { class: 'card', style: { marginTop: '18px' } }, el('div', { class: 'card-h' }, el('h3', null, 'Course philosophy')), el('div', { class: 'card-b' }, el('ul', { class: 'small selectable', style: { paddingLeft: '18px', margin: 0 } }, B.principles.map(p => el('li', { style: { marginBottom: '4px' } }, p))))));
   }
-
   /* ==========================================================================
    * 14. Start
    * ======================================================================== */

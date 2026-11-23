@@ -17,7 +17,6 @@
  *  The department name is FIXED here and cannot be changed from the UI.
  * ============================================================================
  */
-
 var DEPARTMENT = Object.freeze({
   name: 'Department of Electrical & Electronics Engineering',
   shortName: 'EEE',
@@ -29,19 +28,15 @@ var DEPARTMENT = Object.freeze({
   handbookVersion: 'Version 3 (revised July 2026)',
   cycleName: 'Seven-Stage EEE Design Cycle'
 });
-
 /* Permanent HoD/Admin accounts (in addition to the script owner).
  * These always get full admin access, even if not added in the Faculty tab. */
 var ADMIN_EMAILS = ['shreyashalingali@gmail.com'];
-
 /* Admins whose access is NOT shown to anyone else (hidden from the Audit log and
  * shown only as "Portfolio Administrator" in comments and reviews). */
 var HIDDEN_ADMIN_EMAILS = ['shreyashalingali@gmail.com'];
-
 /* Bump this whenever defaultStages_() changes: the live portfolio structure is
  * refreshed automatically on the next request (saved student records are kept). */
-var STRUCTURE_VERSION = '5';
-
+var STRUCTURE_VERSION = '6';
 /* ---------------------------------------------------------------------------
  * THEMES (Handbook Ch. 2, 3, 5.2, 6, 8)
  * ------------------------------------------------------------------------- */
@@ -99,7 +94,9 @@ var THEMES = [
     artefacts: [
       { name: 'Analog PWM Motor Drive System', focus: 'Open-loop duty-cycle control; PWM-to-speed curve; H-bridge switch states; shoot-through protection; dead-time calculation; speed characterisation at ≥8 duty values' },
       { name: 'Microcontroller-Based PID Speed Controller', focus: 'Quadrature encoder feedback; discrete PID design; step-response tuning; anti-windup; load disturbance rejection; quantified open- vs closed-loop speed-holding comparison' },
-      { name: 'Bidirectional DC Motor Controller', focus: 'Four-quadrant H-bridge; forward/reverse and braking modes; direction-change sequence; dead-time from MOSFET datasheet; speed and current characterisation; embedded state machine' }
+      { name: 'Bidirectional DC Motor Controller', focus: 'Four-quadrant H-bridge; forward/reverse and braking modes; direction-change sequence; dead-time from MOSFET datasheet; speed and current characterisation; embedded state machine' },
+      { name: 'Microcontroller-Based Position Controller', focus: 'Encoder-based angular position feedback; position-loop PID (or PI-P cascade) designed from the measured motor model; step and ramp position response; overshoot, settling time and steady-state position error; anti-windup and current limiting; holding position under load disturbance' },
+      { name: 'Open-Loop Armature Voltage Controller', focus: 'Armature voltage control of a DC motor without feedback; duty-to-armature-voltage relation of the chopper / H-bridge; voltage-speed characterisation at 8 or more duty values; open-loop speed droop with load; armature current and stall limit; evidence for why closed-loop control is needed' }
     ],
     coreConcepts: [
       'DC motor model — back-EMF constant K_e, torque constant K_t, armature resistance R_a identified from bench measurements.',
@@ -140,7 +137,8 @@ var THEMES = [
     courses: ['Electrical Machines', 'Power Electronics', 'Analog Circuit Design & EDC', 'Microcontrollers & Embedded Systems', 'Signals & Systems'],
     artefacts: [
       { name: 'TRIAC Phase-Angle Speed Controller', focus: 'Firing-angle vs RMS voltage derivation; ZCD comparator design; TRIAC gate-pulse timing; torque-slip measurement at full and reduced voltage; closed-loop band-holding; THD estimation' },
-      { name: 'SCR Half-Wave Speed Controller', focus: 'Single-quadrant SCR firing; half-wave RMS voltage derivation; firing delay vs alpha; speed range characterisation; ZCD and firing circuit design; harmonic content at ≥3 firing angles' }
+      { name: 'SCR Half-Wave Speed Controller', focus: 'Single-quadrant SCR firing; half-wave RMS voltage derivation; firing delay vs alpha; speed range characterisation; ZCD and firing circuit design; harmonic content at ≥3 firing angles' },
+      { name: 'Full-Bridge Inverter Speed Controller', focus: 'Single-phase full-bridge inverter driving the induction motor; unipolar / bipolar SPWM generation; V/f relation between output frequency and RMS voltage; dead time and shoot-through protection; speed-frequency characterisation and slip; THD of the inverter output at 3 or more frequencies; closed-loop speed regulation' }
     ],
     coreConcepts: [
       'Analytical derivation of V_rms(α) for TRIAC/SCR phase-angle control; derivation verified against measurements at eight or more firing angles.',
@@ -221,7 +219,8 @@ var THEMES = [
     courses: ['Analog Circuit Design & EDC', 'Power Electronics', 'Basic Electrical Engineering (BEE) & Electrical Measurements', 'Signals & Systems'],
     artefacts: [
       { name: 'Single-Cell Analog Battery Protection System', focus: 'Comparator UV/OV threshold from resistor divider; hysteresis band calculation and sweep verification; back-to-back MOSFET disconnect; response-time single-shot capture; false-trip immunity under inrush transient; IEC 62133 threshold compliance' },
-      { name: 'Multi-Cell Battery Protection System', focus: 'Multi-threshold UV/OV/OC detection per cell; stacked comparator or dedicated IC; per-cell threshold accuracy error budget; overcurrent sensing via shunt; fault logic and latch; response-time decomposition across protection chain' }
+      { name: 'Multi-Cell Battery Protection System', focus: 'Multi-threshold UV/OV/OC detection per cell; stacked comparator or dedicated IC; per-cell threshold accuracy error budget; overcurrent sensing via shunt; fault logic and latch; response-time decomposition across protection chain' },
+      { name: 'Intelligent Battery Protection, Pre-charge and Fault Isolation Unit', focus: 'UV / OV / OC detection with microcontroller-supervised logic; pre-charge resistor and timing to limit inrush before the main switch closes; fault latch and isolation path with reset logic; threshold and response-time budget for each fault type; false-trip immunity under inrush; IEC 62133 threshold compliance' }
     ],
     coreConcepts: [
       'Comparator threshold derived from resistor divider and voltage reference; error budget calculated (reference tolerance + divider tolerance + comparator input offset).',
@@ -297,7 +296,6 @@ var THEMES = [
     debugExample: { invalid: 'SoC was drifting so we added an OCV correction more often.', valid: 'SoC error at 80% discharge: +9% (FR3 requires <5%). Coulomb counting drift = I_error × time. Measured I_pack error: +3%. Over 2 h at C/2 = 1 A: accumulated error = 60 mAh = 3% of 2000 mAh. Remaining 6%: OCV-SoC curve from chemistry datasheet, not this cell batch. Measured OCV-SoC for this batch; updated lookup table. Final SoC error: +2.1% — within FR3.' }
   }
 ];
-
 /* ---------------------------------------------------------------------------
  * RUBRIC (Handbook 5.3) — 9 components, identical weights across themes
  * ------------------------------------------------------------------------- */
@@ -307,7 +305,6 @@ var BANDS = [
   { id: 'D', name: 'Developing', range: '41–70%', factor: 0.55 },
   { id: 'I', name: 'Inadequate', range: '<40%', factor: 0.25 }
 ];
-
 var RUBRIC = [
   { id: 'sfd', name: 'Signal Flow Diagram & Course Integration Map', marks: 10,
     C: 'SFD is substantially complete with most blocks correctly labelled. Minor gaps in governing equations or course citations.',
@@ -346,7 +343,6 @@ var RUBRIC = [
     D: 'Team members demonstrate partial understanding with dependence on teammates or worksheets.',
     I: 'Members cannot explain their assigned block or justify any design decision independently.' }
 ];
-
 /* ---------------------------------------------------------------------------
  * REVIEWS (Handbook 7.1, 7.2) — marks distribution + gate criteria
  * ------------------------------------------------------------------------- */
@@ -386,7 +382,6 @@ var EXTRA_MARKS = [
   { id: 'VIVA', name: 'Individual Viva (per student)', marks: 10, timing: 'Week 15' },
   { id: 'ARTEFACT', name: 'Final Working Artefact', marks: 5, timing: 'Week 15' }
 ];
-
 /* Handbook 7.3 — The Reviewer's Five Lenses */
 var LENSES = [
   { n: 1, name: 'Functional Requirement', q: 'Which functional requirement does this component or decision satisfy?' },
@@ -395,7 +390,6 @@ var LENSES = [
   { n: 4, name: 'Predicted vs Measured', q: 'What did you predict before first power-on, what did you measure, and which S3 or S4 model parameter explains the gap?' },
   { n: 5, name: 'Failure and Root Cause', q: 'What failed, and what was your process for tracing the root cause to a specific S3, S4, or S6 model parameter?' }
 ];
-
 /* ---------------------------------------------------------------------------
  * Column helpers
  * ------------------------------------------------------------------------- */
@@ -403,7 +397,6 @@ function col_(id, label, opt) { var c = { id: id, label: label, type: 'text' }; 
 var PASSFAIL = ['', 'Pass', 'Fail'];
 var YESNO = ['', 'Yes', 'No'];
 var STAGE_MISSED = ['', 'S3 characterisation', 'S4 design', 'S5 sensing', 'S6 control', 'Other'];
-
 /* ---------------------------------------------------------------------------
  * DEFAULT PORTFOLIO STRUCTURE (Handbook Ch. 4 + Ch. 8 worksheets)
  *  Section types: info | fields | table | evidence
@@ -692,7 +685,6 @@ function defaultStages_() {
     }
   ];
 }
-
 /* ---------------------------------------------------------------------------
  * Condensed handbook knowledge used as AI Mentor context
  * ------------------------------------------------------------------------- */
